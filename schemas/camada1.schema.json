@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Camada1 Package Schema",
+  "type": "object",
+  "required": ["schemaVersion", "id", "type"],
+  "properties": {
+    "schemaVersion": { "type": "string" },
+    "id": { "type": "string" },
+    "type": { "type": "string", "enum": ["camada1-refs", "camada1-trilha"] },
+    "_teste": { "type": "boolean" },
+    "bookId": { "type": "string" },
+    "bookName": { "type": "string" },
+    "introduction": { "type": "string" },
+    "crossReferences": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["fromVerse", "targets"],
+        "properties": {
+          "fromVerse": { "type": "string" },
+          "targets": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "title": { "type": "string" },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["stepNumber", "title", "verses"],
+        "properties": {
+          "stepNumber": { "type": "integer", "minimum": 1 },
+          "title": { "type": "string" },
+          "verses": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["reference", "text"],
+              "properties": {
+                "reference": { "type": "string" },
+                "text": { "type": "string" }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

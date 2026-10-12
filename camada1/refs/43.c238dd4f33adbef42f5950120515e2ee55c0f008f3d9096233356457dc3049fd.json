@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "pv-camada1-v1",
+  "id": "43",
+  "type": "camada1-refs",
+  "_teste": true,
+  "bookId": "43",
+  "bookName": "João",
+  "introduction": "Introdução de teste ao Evangelho segundo João.",
+  "crossReferences": [
+    {
+      "fromVerse": "43-003-016",
+      "targets": [
+        "45-005-008",
+        "62-004-009"
+      ]
+    }
+  ]
+}
