@@ -50,16 +50,11 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Network-first for JSON content with fallback to cache
+  // Content JSON files: do NOT cache directly in service worker without SHA-256 verification.
+  // app.js verifies SHA-256 hash against content-manifest.json before writing to pv4-data-v1 cache.
   if (url.pathname.endsWith('.json')) {
     event.respondWith(
-      fetch(event.request).then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200) {
-          const resClone = networkResponse.clone();
-          caches.open(DATA_CACHE_NAME).then((cache) => cache.put(event.request, resClone));
-        }
-        return networkResponse;
-      }).catch(() => caches.match(event.request))
+      fetch(event.request).catch(() => caches.match(event.request))
     );
     return;
   }
