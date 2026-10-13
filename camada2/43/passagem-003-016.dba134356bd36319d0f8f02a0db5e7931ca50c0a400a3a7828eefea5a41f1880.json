@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "pv-camada2-v1",
+  "contractVersion": "pv-teaching-r4",
+  "id": "43-003-016",
+  "passageRef": "João 3:16",
+  "_teste": true,
+  "humanReviewed": false,
+  "gospelConnectionType": 1,
+  "openingQuestion": "Como Deus demonstra o Seu amor pela humanidade? (Pergunta de teste)",
+  "whatTextSays": "O texto declara o amor de Deus enviado em Seu Filho. (Texto de teste)",
+  "gospelConnection": "Cristo é o Filho unigênito dado para salvação. (Texto de teste)",
+  "application": "Crer em Jesus Cristo para ter a vida eterna. (Texto de teste)",
+  "prayer": "Senhor Deus, agradecemos por Teu amor em Cristo Jesus. Amém. (Texto de teste)",
+  "lineage": {
+    "generator": "teste-generator",
+    "auditor1": "teste-auditor1",
+    "auditor2": "teste-auditor2"
+  }
+}

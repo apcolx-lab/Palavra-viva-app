@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "pv-camada3-v1",
+  "contractVersion": "pv-teaching-r4",
+  "id": "43-003-016",
+  "verseRef": "João 3:16",
+  "_teste": true,
+  "humanReviewed": false,
+  "studyText": "Estudo de teste para o versículo chave João 3:16.",
+  "lineage": {
+    "generator": "teste-generator",
+    "auditor1": "teste-auditor1",
+    "auditor2": "teste-auditor2"
+  }
+}

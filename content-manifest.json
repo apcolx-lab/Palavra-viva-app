@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "pv-manifest-v1",
+  "contentVersion": "1.0.0-teste",
+  "generation": 1,
+  "licenseAttribution": "Texto Bíblico: Bíblia Livre (CC BY 4.0 Brasil / porbr2018). Referências cruzadas: OpenBible.info (CC BY).",
+  "packages": [
+    {
+      "id": "biblia-43-003",
+      "path": "biblia/43/003.0922a6dc80668723af9c54139ebb5e059d1427ffa969960409fa5fe2471b3bd5.json",
+      "hash": "0922a6dc80668723af9c54139ebb5e059d1427ffa969960409fa5fe2471b3bd5",
+      "size": 342,
+      "type": "biblia"
+    },
+    {
+      "id": "camada1-refs-43",
+      "path": "camada1/refs/43.c238dd4f33adbef42f5950120515e2ee55c0f008f3d9096233356457dc3049fd.json",
+      "hash": "c238dd4f33adbef42f5950120515e2ee55c0f008f3d9096233356457dc3049fd",
+      "size": 352,
+      "type": "camada1-refs"
+    },
+    {
+      "id": "camada1-trilha",
+      "path": "camada1/trilha.a4958a0e75b24ed8fd7312968a7a60529ddbc0c65e881c4e0e3aba8db63b75b1.json",
+      "hash": "a4958a0e75b24ed8fd7312968a7a60529ddbc0c65e881c4e0e3aba8db63b75b1",
+      "size": 385,
+      "type": "camada1-trilha"
+    },
+    {
+      "id": "camada2-43-003-016",
+      "path": "camada2/43/passagem-003-016.dba134356bd36319d0f8f02a0db5e7931ca50c0a400a3a7828eefea5a41f1880.json",
+      "hash": "dba134356bd36319d0f8f02a0db5e7931ca50c0a400a3a7828eefea5a41f1880",
+      "size": 778,
+      "type": "camada2-passagem"
+    },
+    {
+      "id": "camada3-versiculos",
+      "path": "camada3/versiculos.e9a5a4c81a5c268663153829be3b4ec4ba97365f5a06b4662c29019d7dc62fb0.json",
+      "hash": "e9a5a4c81a5c268663153829be3b4ec4ba97365f5a06b4662c29019d7dc62fb0",
+      "size": 365,
+      "type": "camada3-versiculos"
+    }
+  ],
+  "revoked": []
+}

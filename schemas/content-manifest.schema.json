@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Content Manifest Schema",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "contentVersion",
+    "generation",
+    "licenseAttribution",
+    "packages",
+    "revoked"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "string" },
+    "contentVersion": { "type": "string" },
+    "generation": { "type": "integer", "minimum": 1 },
+    "licenseAttribution": { "type": "string" },
+    "packages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "path", "hash", "size", "type"],
+        "properties": {
+          "id": { "type": "string" },
+          "path": { "type": "string" },
+          "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "size": { "type": "integer", "minimum": 0 },
+          "type": {
+            "type": "string",
+            "enum": [
+              "biblia",
+              "camada1-refs",
+              "camada1-trilha",
+              "camada2-passagem",
+              "camada3-versiculos"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "revoked": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": true
+}

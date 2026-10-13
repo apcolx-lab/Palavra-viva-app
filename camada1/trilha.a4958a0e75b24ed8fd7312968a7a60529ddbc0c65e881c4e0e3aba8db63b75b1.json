@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "pv-camada1-v1",
+  "id": "trilha-evangelho",
+  "type": "camada1-trilha",
+  "_teste": true,
+  "title": "A História de Jesus em 9 Passos (Teste)",
+  "steps": [
+    {
+      "stepNumber": 1,
+      "title": "Criação",
+      "verses": [
+        {
+          "reference": "Gn 1:27",
+          "text": "Criou Deus o homem à sua imagem..."
+        }
+      ]
+    }
+  ]
+}

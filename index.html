@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Palavra Viva</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#1f2937">
+  <style>
+    :root {
+      --bg-color: #ffffff;
+      --text-color: #1f2937;
+      --card-bg: #f3f4f6;
+      --primary: #1e40af;
+      --primary-hover: #1d4ed8;
+      --accent: #d97706;
+      --font-size: 18px;
+      --line-height: 1.6;
+    }
+
+    [data-theme="dark"] {
+      --bg-color: #111827;
+      --text-color: #f9fafb;
+      --card-bg: #1f2937;
+      --primary: #3b82f6;
+      --primary-hover: #60a5fa;
+      --accent: #f59e0b;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      font-size: var(--font-size);
+      line-height: var(--line-height);
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background-color: var(--card-bg);
+      padding: 12px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(156, 163, 175, 0.2);
+    }
+
+    .app-title {
+      font-size: 1.25rem;
+      font-weight: bold;
+      margin: 0;
+    }
+
+    .controls {
+      display: flex;
+      gap: 8px;
+    }
+
+    button {
+      min-width: 48px;
+      min-height: 48px;
+      padding: 8px 12px;
+      font-size: 1rem;
+      background-color: var(--primary);
+      color: #ffffff;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    button:hover, button:focus {
+      background-color: var(--primary-hover);
+      outline: 2px solid var(--accent);
+    }
+
+    main {
+      flex: 1;
+      padding: 16px;
+      max-width: 800px;
+      margin: 0 auto;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    .banner-update {
+      background-color: var(--accent);
+      color: #ffffff;
+      padding: 12px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-radius: 6px;
+      margin-bottom: 16px;
+    }
+
+    .nav-breadcrumb {
+      margin-bottom: 16px;
+      font-size: 0.95rem;
+    }
+
+    .nav-breadcrumb button {
+      min-width: auto;
+      min-height: 36px;
+      padding: 4px 8px;
+      margin-right: 8px;
+    }
+
+    .verse-item {
+      margin-bottom: 12px;
+      padding: 8px;
+      border-radius: 4px;
+    }
+
+    .verse-num {
+      font-weight: bold;
+      color: var(--primary);
+      margin-right: 8px;
+    }
+
+    .book-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 12px;
+    }
+
+    .book-card {
+      background-color: var(--card-bg);
+      padding: 16px;
+      border-radius: 8px;
+      text-align: center;
+      cursor: pointer;
+      border: 1px solid rgba(156, 163, 175, 0.2);
+    }
+
+    footer {
+      background-color: var(--card-bg);
+      padding: 16px;
+      text-align: center;
+      font-size: 0.85rem;
+      border-top: 1px solid rgba(156, 163, 175, 0.2);
+      margin-top: auto;
+    }
+
+    .tab-content {
+      display: block;
+    }
+
+    .tab-content:empty {
+      display: none !important;
+    }
+
+    .storage-info {
+      font-size: 0.85rem;
+      margin-top: 12px;
+      color: var(--text-color);
+      opacity: 0.8;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 class="app-title">Palavra Viva</h1>
+    <div class="controls">
+      <button id="btn-font" aria-label="Alternar tamanho da fonte">A</button>
+      <button id="btn-theme" aria-label="Alternar tema claro e escuro">🌓</button>
+      <button id="btn-reset" aria-label="Limpar Cache e Dados">🧹</button>
+    </div>
+  </header>
+
+  <div id="update-banner" class="banner-update" style="display: none;">
+    <span>Nova versão disponível!</span>
+    <button id="btn-update">Atualizar</button>
+  </div>
+
+  <main id="app-container">
+    <div id="nav-bar" class="nav-breadcrumb" style="display: none;">
+      <button id="btn-back">← Voltar</button>
+      <span id="nav-title"></span>
+    </div>
+
+    <!-- Dynamic Reader View -->
+    <section id="reader-view"></section>
+
+    <!-- IndexedDB Data Management / Backup -->
+    <section id="storage-view" style="margin-top: 24px;">
+      <div class="controls" style="gap: 12px; flex-wrap: wrap;">
+        <button id="btn-export-backup">Exportar Backup JSON</button>
+        <button id="btn-import-backup">Importar Backup JSON</button>
+        <input type="file" id="file-backup-input" accept=".json" style="display: none;">
+      </div>
+      <div id="storage-estimate" class="storage-info"></div>
+    </section>
+  </main>
+
+  <footer>
+    <p id="license-attribution">Texto Bíblico: Bíblia Livre (CC BY 4.0 Brasil / porbr2018). Referências cruzadas: OpenBible.info (CC BY).</p>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

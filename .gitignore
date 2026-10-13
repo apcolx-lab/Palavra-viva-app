@@ -1,0 +1,9 @@
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+server.log
+
+# Verification artifacts
+/verification/

@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Biblia Chapter Schema",
+  "type": "object",
+  "required": ["schemaVersion", "bookId", "bookName", "chapter", "verses"],
+  "properties": {
+    "schemaVersion": { "type": "string" },
+    "bookId": { "type": "string" },
+    "bookName": { "type": "string" },
+    "chapter": { "type": "integer", "minimum": 1 },
+    "_teste": { "type": "boolean" },
+    "verses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["verse", "text"],
+        "properties": {
+          "verse": { "type": "integer", "minimum": 1 },
+          "text": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
