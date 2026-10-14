@@ -244,9 +244,9 @@ function renderBookList() {
 
   const bibliaPkgs = manifestData ? manifestData.packages.filter(p => p.type === 'biblia') : [];
 
-  let html = '<h2>Livros da Bíblia</h2>';
+  let html = '<div class="reader-intro"><h2>Leitura bíblica</h2><p>Escolha um capítulo disponível para continuar a leitura.</p></div>';
   if (bibliaPkgs.length === 0) {
-    html += '<p>Nenhum livro disponível no momento.</p>';
+    html += '<p>Nenhum capítulo disponível neste pacote.</p>';
   } else {
     html += '<div class="book-grid">';
     for (const pkg of bibliaPkgs) {
@@ -255,10 +255,10 @@ function renderBookList() {
       const chapter = parseInt(parts[2], 10);
 
       html += `
-        <div class="book-card" data-book="${bookId}" data-chapter="${chapter}">
-          <strong>João</strong>
+        <button type="button" class="book-card" data-book="${bookId}" data-chapter="${chapter}">
+          <strong>${bookId === "43" ? "João" : "Livro " + bookId}</strong>
           <div>Capítulo ${chapter}</div>
-        </div>
+        </button>
       `;
     }
     html += '</div>';
@@ -281,8 +281,8 @@ async function renderChapter(bookId, chapter) {
   const navTitle = document.getElementById('nav-title');
   const btnBack = document.getElementById('btn-back');
 
-  navBar.style.display = 'block';
-  navTitle.textContent = `João ${chapter}`;
+  navBar.style.display = 'flex';
+  navTitle.textContent = `Capítulo ${chapter}`;
 
   btnBack.onclick = () => renderBookList();
 
@@ -297,6 +297,7 @@ async function renderChapter(bookId, chapter) {
   try {
     const data = await fetchVerifiedPackage(pkg);
 
+    navTitle.textContent = `${data.bookName} ${data.chapter}`;
     let html = `<h2>${data.bookName} ${data.chapter}</h2>`;
     html += '<div class="verses-list">';
     for (const v of data.verses) {
