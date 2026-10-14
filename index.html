@@ -13,7 +13,7 @@
       --card-bg: #ffffff;
       --primary: #205a48;
       --primary-hover: #174433;
-      --accent: #b58a45;
+      --accent: #916822;
       --font-size: 18px;
       --line-height: 1.6;
     }
@@ -168,7 +168,7 @@
     #reader-view h2 { font-family: Georgia, 'Times New Roman', serif; font-size: clamp(1.65rem, 6vw, 2.25rem); line-height: 1.25; margin: 20px 0 24px; }
     .verses-list { max-width: 66ch; }
     .verse-item { padding: 0 0 14px; margin: 0; line-height: 1.8; overflow-wrap: anywhere; }
-    .verse-num { color: var(--accent); font-size: .8em; vertical-align: .1em; }
+    .verse-num { color: var(--text-color); opacity: .85; font-size: .8em; vertical-align: .1em; }
     .verse-text { font-family: Georgia, 'Times New Roman', serif; }
     .book-card { text-align: left; border-radius: 14px; min-height: 90px; }
     .book-card:focus-visible { outline: 3px solid var(--accent); }
@@ -180,6 +180,12 @@
     .settings-panel .controls { margin-top: 12px; }
     .settings-panel button { font-size: .9rem; padding: 10px 14px; }
     @media (max-width: 380px) { .app-title { font-size: 1.15rem; } header .controls { gap: 4px; } header .controls button { min-width: 44px; } }
+    .reader-intro { padding: 18px 0 12px; }
+    .reader-intro p { margin: 0; color: var(--text-color); opacity: .8; }
+    .book-card { display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+    .book-card strong { font-family: Georgia, 'Times New Roman', serif; font-size: 1.15rem; }
+    .book-card div { font-size: .9rem; opacity: .8; }
+    button:focus-visible, summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
     .storage-info {
       font-size: 0.85rem;
       margin-top: 12px;
@@ -194,7 +200,6 @@
     <div class="controls">
       <button id="btn-font" aria-label="Alternar tamanho da fonte">A</button>
       <button id="btn-theme" aria-label="Alternar tema claro e escuro">🌓</button>
-      
     </div>
   </header>
 
