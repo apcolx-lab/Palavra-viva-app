@@ -182,7 +182,8 @@
     @media (max-width: 380px) { .app-title { font-size: 1.15rem; } header .controls { gap: 4px; } header .controls button { min-width: 44px; } }
     .reader-intro { padding: 18px 0 12px; }
     .reader-intro p { margin: 0; color: var(--text-color); opacity: .8; }
-    .book-card { display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+    .book-card { display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 4px; color: var(--text-color); font-size: 1rem; min-height: 90px; width: 100%; }
+    .book-card:hover, .book-card:focus { background: var(--card-bg); color: var(--text-color); }
     .book-card strong { font-family: Georgia, 'Times New Roman', serif; font-size: 1.15rem; }
     .book-card div { font-size: .9rem; opacity: .8; }
     button:focus-visible, summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
