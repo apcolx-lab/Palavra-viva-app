@@ -1,0 +1,4 @@
+Teste de gravação GitHub pelo ChatGPT
+Data: 2026-10-14
+Finalidade: verificar escrita por integração GitHub.
+Este arquivo não modifica o aplicativo publicado.
