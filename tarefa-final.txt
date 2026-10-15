@@ -1,0 +1,2185 @@
+ATENÇÃO: este arquivo (tarefa-final.txt) está na raiz do repositório e é a tarefa completa. Leia-o inteiro pelo sistema de arquivos, sem resumir e sem esperar que o texto seja colado no chat.
+
+TAREFA: substituir o aplicativo inteiro por uma versão já pronta e testada (visual do Palavra Viva Robusto, estudo em camadas, busca, destaques, modo offline).
+
+REGRA MAIS IMPORTANTE: este código foi escrito e testado fora daqui. NÃO melhore, NÃO reescreva, NÃO "corrija", NÃO reformate e NÃO resuma nada. Grave cada arquivo exatamente como está, caractere por caractere. Quando um teste ou um checksum falhar, a causa é cópia imperfeita: regrave o arquivo igual ao original, não mude o código.
+
+PASSO 1. Apague o que é da versão anterior (se existir): storage.js; as pastas biblia/, camada1/, camada2/, camada3/; content-manifest.json e a pasta content/ (serão regenerados); dentro de tests/ e scripts/, qualquer arquivo que NÃO esteja na lista abaixo. Mantenha como estão: docs/, icons/, assets/, LICENSE e qualquer arquivo que esta tarefa não mencione. Confirme que icons/icon-192.png e icons/icon-512.png existem; se não existirem, não invente ícones: avise no PR.
+
+PASSO 2. Grave os arquivos abaixo. Formato: cada arquivo começa numa linha "<<<FILE caminho>>>" e termina numa linha "<<<END>>>". O conteúdo do arquivo é tudo que está entre essas duas linhas, com uma quebra de linha no final (LF, sem CRLF). Crie as pastas que faltarem. Os marcadores não fazem parte do arquivo.
+
+PASSO 3. Grave a lista CHECKSUMS (bloco no fim) em /tmp/CHECKSUMS.txt (fora do repositório; não faça commit dela). Na raiz do repositório rode: sha256sum -c /tmp/CHECKSUMS.txt . Todos precisam dar OK. Para cada FAILED, regrave aquele arquivo exatamente como no original e rode de novo, até todos darem OK.
+
+PASSO 4. Rode, nesta ordem: node scripts/build-manifest.mjs ; node scripts/validate-content.mjs ; node --test tests/*.test.mjs . Esperado: manifesto geração 100, "conteúdo válido", 28 testes passando e 0 falhas. Se algo falhar, NÃO altere o código para passar: volte ao passo 3. Se persistir, descreva o erro exato no PR.
+
+PASSO 5. Faça commit de tudo, incluindo content-manifest.json e content/ gerados no passo 4, e abra o pull request com o título "Substitui o app: visual do Robusto, estudo em camadas, busca e offline". Na descrição, liste os arquivos removidos e o resultado dos testes. Não altere mais nada. Por último, apague o arquivo tarefa-final.txt da raiz do repositório (ele só servia para entregar esta tarefa) e inclua essa remoção no mesmo commit. Não rode nenhum workflow: depois do merge, o GitHub baixa o texto da Bíblia sozinho (workflow importar-biblia).
+
+Observação: as imagens e o áudio (pasta assets/) NÃO fazem parte desta tarefa; o app funciona sem eles (aparece fundo verde no lugar das fotos). Não invente nem baixe imagens.
+
+==================== ARQUIVOS ====================
+<<<FILE .github/workflows/ci.yml>>>
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node --test tests/*.test.mjs
+      - run: node scripts/validate-content.mjs
+<<<END>>>
+
+<<<FILE .github/workflows/pages.yml>>>
+name: Pages
+on:
+  workflow_run: { workflows: [CI], types: [completed], branches: [main] }
+  workflow_dispatch:
+permissions: { contents: read, pages: write, id-token: write }
+concurrency: { group: pages, cancel-in-progress: false }
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment: { name: github-pages, url: '${{ steps.d.outputs.page_url }}' }
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: '${{ github.event.workflow_run.head_sha || github.sha }}' }
+      - name: Copiar só o que é publicável e carimbar a versão do app
+        run: |
+          mkdir site
+          cp -r index.html app.js styles.css sw.js manifest.json config.json reset.html content-manifest.json icons src content site/
+          if [ -d assets ]; then cp -r assets site/; fi
+          # versão = hash dos arquivos do app (só muda quando o app muda; troca de conteúdo não gera aviso de atualização)
+          H=$(cat index.html app.js styles.css src/*.js manifest.json reset.html icons/*.png | sha256sum | cut -c1-8)
+          sed -i "s/__SHELL_HASH__/$H/g" site/sw.js site/app.js
+          grep -q "$H" site/sw.js
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: site }
+      - id: d
+        uses: actions/deploy-pages@v4
+<<<END>>>
+
+<<<FILE .github/workflows/kaggle-viabilidade.yml>>>
+name: kaggle-viabilidade
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/kaggle-viabilidade.yml"
+      - "kaggle/viabilidade/**"
+permissions:
+  contents: write
+concurrency:
+  group: kaggle-viabilidade
+  cancel-in-progress: false
+jobs:
+  teste:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "kaggle>=1.8.0"
+      - name: Enviar ao Kaggle e esperar
+        run: |
+          mkdir -p out
+          ID=$(python -c "import json;print(json.load(open('kaggle/viabilidade/kernel-metadata.json'))['id'])")
+          kaggle kernels push -p kaggle/viabilidade > out/push.txt 2>&1 || true
+          echo "id=$ID" >> out/push.txt
+          for i in $(seq 1 80); do
+            sleep 30
+            kaggle kernels status "$ID" > out/status.txt 2>&1 || true
+            if grep -Eqi "complete|error|cancel|failed" out/status.txt; then break; fi
+          done
+          kaggle kernels output "$ID" -p out > out/output.txt 2>&1 || true
+      - name: Gravar resultado no repositório
+        if: always()
+        run: |
+          mkdir -p docs/viabilidade
+          cp -f out/* docs/viabilidade/ 2>/dev/null || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/viabilidade
+          git diff --cached --quiet || git commit -m "docs: resultado do teste de viabilidade Kaggle"
+          git pull --rebase origin main || true
+          git push origin HEAD:main || true
+<<<END>>>
+
+<<<FILE .github/workflows/importar-biblia.yml>>>
+name: importar-biblia
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/importar-biblia.yml"
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: importar-biblia
+  cancel-in-progress: false
+jobs:
+  importar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Baixar a Bíblia Livre 2018 (eBible.org)
+        run: |
+          mkdir -p /tmp/usfm
+          curl -fL --retry 3 -o /tmp/porbr2018.zip https://ebible.org/Scriptures/porbr2018_usfm.zip
+          unzip -tq /tmp/porbr2018.zip
+          unzip -q /tmp/porbr2018.zip -d /tmp/usfm
+      - name: Converter, validar e montar o manifesto
+        run: |
+          python3 -I scripts/import-ebible.py /tmp/usfm --producao
+          node scripts/build-manifest.mjs
+          node scripts/validate-content.mjs
+          node --test tests/*.test.mjs
+      - name: Gravar no repositório e publicar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A content-src content content-manifest.json docs
+          git diff --cached --quiet && { echo "nada mudou"; exit 0; }
+          git commit -m "conteúdo: Bíblia Livre 2018 (66 livros, 1189 capítulos)"
+          git pull --rebase origin main
+          git push origin HEAD:main
+          gh workflow run pages.yml --ref main
+<<<END>>>
+
+<<<FILE scripts/import-ebible.py>>>
+#!/usr/bin/env python3
+"""Converte a Bíblia em USFM (eBible.org, porbr2018) em content-src/ do app.
+Uso: python3 scripts/import-ebible.py <pasta-com-usfm> [--raiz .]
+Falha (código 1) se faltar livro/capítulo; lacunas de versículo vão para docs/importacao.txt."""
+import sys, re, json, shutil
+from pathlib import Path
+
+CODES = ("GEN EXO LEV NUM DEU JOS JDG RUT 1SA 2SA 1KI 2KI 1CH 2CH EZR NEH EST JOB PSA PRO ECC SNG ISA JER LAM EZK DAN HOS JOL AMO OBA JON MIC NAM HAB ZEP HAG ZEC MAL "
+         "MAT MRK LUK JHN ACT ROM 1CO 2CO GAL EPH PHP COL 1TH 2TH 1TI 2TI TIT PHM HEB JAS 1PE 2PE 1JN 2JN 3JN JUD REV").split()
+CHAPS = [50,40,27,36,34,24,21,4,31,24,22,25,29,36,10,13,10,42,150,31,12,8,66,52,5,48,12,14,3,9,1,4,7,3,3,3,2,14,4,
+         28,16,24,21,28,16,16,13,6,6,4,4,5,3,6,4,3,1,13,5,5,3,5,1,1,1,22]
+NAMES = ["Gênesis","Êxodo","Levítico","Números","Deuteronômio","Josué","Juízes","Rute","1 Samuel","2 Samuel","1 Reis","2 Reis","1 Crônicas","2 Crônicas","Esdras","Neemias","Ester","Jó","Salmos","Provérbios","Eclesiastes","Cantares","Isaías","Jeremias","Lamentações","Ezequiel","Daniel","Oseias","Joel","Amós","Obadias","Jonas","Miqueias","Naum","Habacuque","Sofonias","Ageu","Zacarias","Malaquias",
+         "Mateus","Marcos","Lucas","João","Atos","Romanos","1 Coríntios","2 Coríntios","Gálatas","Efésios","Filipenses","Colossenses","1 Tessalonicenses","2 Tessalonicenses","1 Timóteo","2 Timóteo","Tito","Filemom","Hebreus","Tiago","1 Pedro","2 Pedro","1 João","2 João","3 João","Judas","Apocalipse"]
+assert len(CODES) == 66 and len(CHAPS) == 66 and len(NAMES) == 66, (len(CODES), len(CHAPS), len(NAMES))
+
+NOTE = re.compile(r'\\(f|fe|x|xt|ef|ex)\b.*?\\\1\*', re.S)
+SKIP = {'id','ide','h','toc1','toc2','toc3','mt','mt1','mt2','mt3','ms','ms1','mr','s','s1','s2','s3','r','d','sp','rem','b','cl','cp','cd','sr','imt','is','ip','iot','io','ili','ie'}
+
+def clean(t):
+    t = NOTE.sub('', t)
+    t = re.sub(r'\\w\s+([^|\\]*)\|[^\\]*\\w\*', r'\1', t)   # \w palavra|lemma\w*
+    t = re.sub(r'\\\+?\w+\*?', '', t)          # demais marcadores de caractere (\add, \nd, \wj ...)
+    return re.sub(r'\s+', ' ', t).strip()
+
+def parse(path):
+    raw = path.read_text(encoding='utf-8-sig')
+    raw = NOTE.sub('', raw)
+    m = re.search(r'^\\id\s+(\w{3})', raw, re.M)
+    if not m: return None
+    code, chapters, ch, vs = m.group(1).upper(), {}, None, None
+    for line in raw.splitlines():
+        mm = re.match(r'\\(\w+)\*?\s?(.*)$', line.strip())
+        if not mm: 
+            if vs is not None and line.strip(): vs[1].append(line.strip())
+            continue
+        tag, rest = mm.group(1), mm.group(2)
+        if tag == 'c':
+            n = re.match(r'(\d+)', rest)
+            if n: ch = int(n.group(1)); chapters[ch] = []; vs = None
+        elif tag == 'v' and ch is not None:
+            n = re.match(r'(\d+)(?:[-–](\d+))?[a-b]?\s*(.*)$', rest)
+            if n:
+                vs = [int(n.group(1)), [n.group(3)], int(n.group(2)) if n.group(2) else None]
+                chapters[ch].append(vs)
+        elif tag in SKIP: 
+            if tag in ('s','s1','s2','s3','r','d','b','ms','ms1','mr','sp'): vs = vs if tag == 'b' else vs
+            continue
+        elif vs is not None and rest:
+            vs[1].append(rest)
+    return code, chapters
+
+def main():
+    args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    src = Path(args[0]); root = Path(sys.argv[sys.argv.index('--raiz')+1]) if '--raiz' in sys.argv else Path('.')
+    found = {}
+    for f in sorted(list(src.rglob('*.usfm')) + list(src.rglob('*.SFM')) + list(src.rglob('*.sfm'))):
+        r = parse(f)
+        if r and r[0] in CODES: found[r[0]] = r[1]
+    erros, avisos = [], []
+    out = root / 'content-src' / 'biblia'
+    if out.exists(): shutil.rmtree(out)
+    total = 0
+    for i, code in enumerate(CODES):
+        bid = str(i + 1)
+        if code not in found: erros.append(f'livro ausente: {NAMES[i]} ({code})'); continue
+        chs = found[code]
+        for c in range(1, CHAPS[i] + 1):
+            verses = []
+            for n, parts, ate in chs.get(c, []):
+                t = clean(' '.join(parts))
+                if t: verses.append({'n': n, 't': t})
+            if not verses: erros.append(f'capítulo vazio: {NAMES[i]} {c}'); continue
+            nums = [v['n'] for v in verses]
+            if nums != sorted(set(nums)): erros.append(f'versículos fora de ordem: {NAMES[i]} {c}')
+            falt = [k for k in range(1, max(nums)+1) if k not in nums]
+            if falt: avisos.append(f'{NAMES[i]} {c}: faltam versículos {falt}')
+            d = out / bid; d.mkdir(parents=True, exist_ok=True)
+            (d / f'{bid}-{c}.json').write_text(json.dumps({'book': bid, 'chapter': c, 'verses': verses}, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+            total += 1
+        extra = [c for c in chs if c > CHAPS[i]]
+        if extra: erros.append(f'capítulos a mais em {NAMES[i]}: {extra}')
+    docs = root / 'docs'; docs.mkdir(exist_ok=True)
+    (docs / 'importacao.txt').write_text('Capítulos gravados: %d de 1189\nERROS (%d):\n%s\nAVISOS (%d):\n%s\n' % (total, len(erros), '\n'.join(erros), len(avisos), '\n'.join(avisos)), encoding='utf-8')
+    if '--producao' in sys.argv and not erros:
+        for t in (root/'content-src'/'camada2'/'teste', ):
+            if t.exists(): shutil.rmtree(t)
+        mp = root/'content-src'/'meta.json'; meta = json.loads(mp.read_text(encoding='utf-8'))
+        meta.update(contentVersion='1.0.0', production=True,
+                    license={'text': 'Texto bíblico: Bíblia Livre (BLIVRE), 2018, de Diego Santos, Mario Sérgio e Marco Teles, licença Creative Commons Atribuição 4.0 (CC BY 4.0). Fonte: eBible.org. O app não altera o texto.', 'url': 'https://ebible.org/porbr2018/copyright.htm'},
+                    books=[{'id': str(i+1), 'name': NAMES[i]} for i in range(66)])
+        mp.write_text(json.dumps(meta, ensure_ascii=False, separators=(',', ':')) + '\n', encoding='utf-8')
+    print('capítulos', total, 'erros', len(erros), 'avisos', len(avisos))
+    if erros: print('\n'.join(erros[:20])); sys.exit(1)
+
+main()
+<<<END>>>
+
+<<<FILE tests/import.test.mjs>>>
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const CODES = 'GEN EXO LEV NUM DEU JOS JDG RUT 1SA 2SA 1KI 2KI 1CH 2CH EZR NEH EST JOB PSA PRO ECC SNG ISA JER LAM EZK DAN HOS JOL AMO OBA JON MIC NAM HAB ZEP HAG ZEC MAL MAT MRK LUK JHN ACT ROM 1CO 2CO GAL EPH PHP COL 1TH 2TH 1TI 2TI TIT PHM HEB JAS 1PE 2PE 1JN 2JN 3JN JUD REV'.split(' ');
+const CH = [50,40,27,36,34,24,21,4,31,24,22,25,29,36,10,13,10,42,150,31,12,8,66,52,5,48,12,14,3,9,1,4,7,3,3,3,2,14,4,28,16,24,21,28,16,16,13,6,6,4,4,5,3,6,4,3,1,13,5,5,3,5,1,1,1,22];
+function fixture(skip) {
+  const d = mkdtempSync(join(tmpdir(), 'usfm-'));
+  CODES.forEach((c, i) => {
+    if (c === skip) return;
+    let u = `\\id ${c} teste\n\\h Livro\n\\mt1 Título\n`;
+    for (let ch = 1; ch <= CH[i]; ch++) {
+      u += `\\c ${ch}\n\\s1 Cabeçalho\n\\p\n\\v 1 Texto ${c} ${ch}:1 com \\w palavra|strong="G1"\\w* e nota\\f + \\fr 1:1 \\ft rodapé\\f* fim.\n\\q1\n\\v 2 Linha um\n\\q2 linha dois\\add inserida\\add*.\n`;
+    }
+    writeFileSync(join(d, `${String(i + 1).padStart(2, '0')}-${c}.usfm`), u);
+  });
+  return d;
+}
+test('importa 66 livros e 1189 capítulos limpando notas e marcadores', () => {
+  const d = fixture(), out = mkdtempSync(join(tmpdir(), 'raiz-'));
+  const r = spawnSync('python3', ['-I', join(root, 'scripts/import-ebible.py'), d, '--raiz', out], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const j = JSON.parse(readFileSync(join(out, 'content-src/biblia/43/43-3.json'), 'utf8'));
+  assert.equal(j.book, '43'); assert.equal(j.chapter, 3);
+  assert.equal(j.verses[0].t, 'Texto JHN 3:1 com palavra e nota fim.');
+  assert.equal(j.verses[1].t, 'Linha um linha dois inserida.');
+  assert.ok(existsSync(join(out, 'content-src/biblia/19/19-150.json')));
+  assert.match(readFileSync(join(out, 'docs/importacao.txt'), 'utf8'), /1189 de 1189/);
+});
+test('livro ausente faz a importação falhar', () => {
+  const d = fixture('MRK'), out = mkdtempSync(join(tmpdir(), 'raiz-'));
+  const r = spawnSync('python3', ['-I', join(root, 'scripts/import-ebible.py'), d, '--raiz', out], { encoding: 'utf8' });
+  assert.equal(r.status, 1); assert.match(r.stdout, /livro ausente: Marcos/);
+});
+<<<END>>>
+
+<<<FILE tests/fixtures/content-src/meta.json>>>
+{"contentVersion":"0.0.1-teste","production":false,"license":{"text":"Conteúdo de teste fictício, sem texto bíblico real.","url":""},"books":[{"id":"teste1","name":"Livro de Teste"}],"minGeneration":100}
+<<<END>>>
+
+<<<FILE tests/fixtures/content-src/biblia/teste/teste1-1.json>>>
+{"_teste":true,"book":"teste1","chapter":1,"verses":[{"n":1,"t":"Versículo fictício um do capítulo 1, apenas para testar o leitor."},{"n":2,"t":"Versículo fictício dois do capítulo 1, apenas para testar o leitor."},{"n":3,"t":"Versículo fictício três do capítulo 1, apenas para testar o leitor."},{"n":4,"t":"Versículo fictício quatro do capítulo 1, apenas para testar o leitor."},{"n":5,"t":"Versículo fictício cinco do capítulo 1, apenas para testar o leitor."},{"n":6,"t":"Versículo fictício seis do capítulo 1, apenas para testar o leitor."}]}
+<<<END>>>
+
+<<<FILE tests/fixtures/content-src/biblia/teste/teste1-2.json>>>
+{"_teste":true,"book":"teste1","chapter":2,"verses":[{"n":1,"t":"Versículo fictício um do capítulo 2, apenas para testar o leitor."},{"n":2,"t":"Versículo fictício dois do capítulo 2, apenas para testar o leitor."},{"n":3,"t":"Versículo fictício três do capítulo 2, apenas para testar o leitor."},{"n":4,"t":"Versículo fictício quatro do capítulo 2, apenas para testar o leitor."}]}
+<<<END>>>
+
+<<<FILE tests/fixtures/content-src/biblia/teste/teste1-3.json>>>
+{"_teste":true,"book":"teste1","chapter":3,"verses":[{"n":1,"t":"Versículo fictício um do capítulo 3, apenas para testar o leitor."},{"n":2,"t":"Versículo fictício dois do capítulo 3, apenas para testar o leitor."},{"n":3,"t":"Versículo fictício três do capítulo 3, apenas para testar o leitor."},{"n":4,"t":"Versículo fictício quatro do capítulo 3, apenas para testar o leitor."}]}
+<<<END>>>
+
+<<<FILE tests/fixtures/content-src/camada2/teste/teste1-1-1-3.json>>>
+{"_teste":true,"id":"teste1-1-1-3","ref":"Livro de Teste 1:1-3","book":"teste1","chapter":1,"verses":[{"n":1,"t":"Versículo fictício um do capítulo 1, apenas para testar o leitor."},{"n":2,"t":"Versículo fictício dois do capítulo 1, apenas para testar o leitor."},{"n":3,"t":"Versículo fictício três do capítulo 1, apenas para testar o leitor."}],"pergunta":"Pergunta de exemplo: o que muda quando você lê devagar?","entender":"Texto explicativo fictício para testar a aba Entender.\n\nSegundo parágrafo fictício, para testar a quebra de parágrafos.","ligar":{"texto":"Ligação fictícia para testar a aba Ligar ao evangelho."},"refs":["Livro de Teste 2:3","Livro de Teste 3:1","Gênesis 1:1"]}
+<<<END>>>
+
+<<<FILE tests/fixtures/content-src/camada2/teste/teste1-2-1-2.json>>>
+{"_teste":true,"id":"teste1-2-1-2","ref":"Livro de Teste 2:1-2","book":"teste1","chapter":2,"verses":[{"n":1,"t":"Versículo fictício um do capítulo 2, apenas para testar o leitor."},{"n":2,"t":"Versículo fictício dois do capítulo 2, apenas para testar o leitor."}],"entender":"Outro texto explicativo fictício.","ligar":{"texto":"Texto fictício com o selo Cristo neste texto.","selo":true},"pergunta":"Pergunta de exemplo dois: o que você leva deste trecho para hoje?"}
+<<<END>>>
+
+<<<FILE README.md>>>
+# Palavra Viva
+
+Bíblia em português, gratuita e sem internet, com ensino em camadas. PWA estático publicado no GitHub Pages.
+
+## Como o app funciona
+- **Estrutura fixa:** `src/books.js` tem os 66 livros. O texto vem de pacotes em `content/`, listados em `content-manifest.json` com hash SHA-256. Pacote que não confere com o hash é recusado.
+- **Offline:** o service worker (`sw.js`) guarda o app e os capítulos na instalação. "Baixar para ler sem internet" guarda também as passagens de estudo.
+- **Atualização:** nunca automática. O app mostra "Há uma versão nova" e só troca quando a pessoa toca em Atualizar. O número de versão do app é carimbado no deploy (hash dos arquivos do app), então só muda quando o app muda.
+- **Conteúdo:** só aceita manifesto de geração maior que a guardada. O último conteúdo válido nunca é descartado.
+- **Estudo:** abas Ler, Entender, Ligar ao evangelho e Aprofundar. Aba sem conteúdo não aparece.
+
+## Configuração (`config.json`)
+`ownerName`, `year`, `contactEmail`, `pixKey`, `siteUrl`, `audio`. Se `pixKey` estiver vazio, o item "Abençoe este Projeto" some. A chave Pix nunca aparece na tela, só é copiada.
+
+## Arquivos que ficam fora do código (enviar para `assets/`)
+`hero-bible.jpg`, `hero-dawn.jpg`, `hero-reading.jpg`, `abencoe.jpg`, `ambiente-leitura.mp3` (opcional: sem ele o app usa um pad sintetizado). Se faltar imagem, aparece um fundo verde no lugar.
+
+## Testes
+- `node --test tests/*.test.mjs` e `node scripts/validate-content.mjs` (rodam no CI a cada push).
+
+## Adicionar conteúdo
+1. Coloque o JSON em `content-src/biblia/...` (capítulo) ou `content-src/camada2/...` (passagem).
+2. `node scripts/build-manifest.mjs` (gera arquivos com hash e sobe a geração).
+3. `node scripts/validate-content.mjs`, depois commit e push.
+
+Passagens reais exigem auditoria: 2 auditores de famílias diferentes entre si e do gerador, 36 critérios todos "P". Enquanto `production` for `false` em `content-src/meta.json`, o app avisa que o conteúdo é fictício.
+
+## Numeração do conteúdo
+`minGeneration` em `content-src/meta.json` garante que a geração nunca fique abaixo da que os aparelhos já guardaram (o app só aceita geração maior). Não diminua esse número.
+
+## Voltar atrás (rollback)
+Restaure em `content-src/` a versão boa e rode o build: a geração sobe de novo (nunca desce), então os aparelhos aceitam.
+
+## Fábrica de conteúdo (Kaggle)
+`.github/workflows/kaggle-viabilidade.yml` testa se o Kaggle libera GPU e internet pela API e quais modelos baixam sem aceitar licença. O resultado fica em `docs/viabilidade/`. Precisa do segredo `KAGGLE_API_TOKEN`.
+<<<END>>>
+
+<<<FILE app.js>>>
+/* Palavra Viva: app (interface + leitura + estudo). Offline primeiro. Sem dependências externas.
+   Regras do plano: conteúdo só entra se o hash conferir; aba sem conteúdo não aparece; o último conteúdo válido nunca é descartado. */
+(function () {
+  'use strict';
+  var core = window.PVCore, BK = window.PVBooks;
+  var CONTENT = 'pv4-content', MEDIA = 'pv4-media';
+  var APP_VERSION = '__SHELL_HASH__';
+  var SHIELD = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>';
+
+  /* ---------- utilitários ---------- */
+  function $(s, r) { return (r || document).querySelector(s); }
+  function $$(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
+  function h(tag, attrs, kids) {
+    var e = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) {
+      var v = attrs[k];
+      if (k === 'text') e.textContent = v;
+      else if (k.indexOf('on') === 0 && typeof v === 'function') e.addEventListener(k.slice(2), v);
+      else if (v !== false && v != null) e.setAttribute(k, v);
+    });
+    (kids || []).forEach(function (c) { if (c != null) e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+    return e;
+  }
+  function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
+  function lsGet(k, d) { try { var v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* sem armazenamento: segue */ } }
+  function ssGet(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }
+  function ssSet(k, v) { try { sessionStorage.setItem(k, v); } catch (e) { /* ignora */ } }
+  var toastTimer = null;
+  function toast(msg) {
+    var t = $('#toast'); t.textContent = msg; t.classList.add('on');
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.classList.remove('on'); }, 2200);
+  }
+  function copy(text, okMsg) {
+    var ok = function () { toast(okMsg); };
+    var fallback = function () {
+      var a = document.createElement('textarea'); a.value = text; a.setAttribute('readonly', ''); a.style.cssText = 'position:fixed;opacity:0;top:0';
+      document.body.appendChild(a); a.select();
+      try { document.execCommand('copy'); ok(); } catch (e) { toast('Não foi possível copiar.'); }
+      a.remove();
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok, fallback); else fallback();
+  }
+  function relPath(url) { var base = new URL('./', location.href).pathname; var p = new URL(url).pathname; return p.indexOf(base) === 0 ? p.slice(base.length) : p.replace(/^\//, ''); }
+
+  /* ---------- configuração (dono, contato, Pix, áudio): arquivo config.json ---------- */
+  var cfg = { ownerName: '', year: '', contactEmail: 'contato.palavravivabr@gmail.com', pixKey: '', siteUrl: '', audio: [] };
+  async function loadConfig() {
+    try {
+      var r = await fetch('config.json');
+      if (r.ok) { var j = await r.json(); Object.keys(cfg).forEach(function (k) { if (j[k] != null) cfg[k] = j[k]; }); }
+    } catch (e) { /* sem config: usa o padrão */ }
+  }
+
+  /* ---------- aparência ---------- */
+  function applyAppearance() {
+    var s = parseFloat(lsGet('pv4-fs', '1.125')); if (!(s >= 1 && s <= 1.5)) s = 1.125;
+    document.documentElement.style.setProperty('--fs', s + 'rem');
+    $$('#fsz button').forEach(function (b) { b.setAttribute('aria-pressed', String(parseFloat(b.dataset.s) === s)); });
+    var m = lsGet('pv4-theme', 'auto');
+    if (m === 'light' || m === 'dark') document.documentElement.setAttribute('data-theme', m); else { m = 'auto'; document.documentElement.removeAttribute('data-theme'); }
+    $$('#thm button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.m === m)); });
+    var dark = m === 'dark' || (m === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+    var meta = $('meta[name="theme-color"]'); if (meta) meta.setAttribute('content', dark ? '#12191A' : '#1F4D43');
+  }
+
+  /* ---------- IndexedDB: destaques, anotações, onde parei (prefixo pv4-) ---------- */
+  var dbp = null;
+  function db() {
+    if (!dbp) dbp = new Promise(function (res, rej) {
+      var q = indexedDB.open('pv4-reader', 1);
+      q.onupgradeneeded = function () { var d = q.result; ['kv', 'highlights', 'notes'].forEach(function (s) { if (!d.objectStoreNames.contains(s)) d.createObjectStore(s); }); };
+      q.onsuccess = function () { res(q.result); }; q.onerror = function () { rej(q.error); };
+    });
+    return dbp;
+  }
+  function tx(store, mode, fn) {
+    return db().then(function (d) { return new Promise(function (res, rej) {
+      var t = d.transaction(store, mode), s = t.objectStore(store), r = fn(s);
+      t.oncomplete = function () { res(r && r.result); }; t.onerror = function () { rej(t.error); };
+    }); });
+  }
+  function kvGet(k) { return tx('kv', 'readonly', function (s) { return s.get(k); }).catch(function () { return null; }); }
+  function kvSet(k, v) { return tx('kv', 'readwrite', function (s) { return s.put(v, k); }).catch(function () { /* sem DB: segue */ }); }
+  function hlAll() {
+    return db().then(function (d) { return new Promise(function (res) {
+      var out = {}, c = d.transaction('highlights', 'readonly').objectStore('highlights').openCursor();
+      c.onsuccess = function () { var cur = c.result; if (cur) { out[cur.key] = true; cur.continue(); } else res(out); };
+      c.onerror = function () { res(out); };
+    }); }).catch(function () { return {}; });
+  }
+  function hlSet(key, on) { return tx('highlights', 'readwrite', function (s) { return on ? s.put(true, key) : s.delete(key); }).catch(function () { toast('Não foi possível salvar o destaque neste aparelho.'); }); }
+  function exportAll() {
+    return db().then(function (d) {
+      var out = { app: 'palavra-viva', version: 1, exportedAt: new Date().toISOString(), kv: {}, highlights: {}, notes: {} };
+      return Promise.all(['kv', 'highlights', 'notes'].map(function (name) { return new Promise(function (res) {
+        var c = d.transaction(name, 'readonly').objectStore(name).openCursor();
+        c.onsuccess = function () { var cur = c.result; if (cur) { out[name][cur.key] = cur.value; cur.continue(); } else res(); };
+        c.onerror = function () { res(); };
+      }); })).then(function () { return out; });
+    });
+  }
+  function importAll(obj) {
+    if (!obj || obj.app !== 'palavra-viva' || obj.version !== 1) return Promise.reject(new Error('Arquivo de backup inválido.'));
+    return db().then(function (d) { return new Promise(function (res, rej) {
+      var t = d.transaction(['kv', 'highlights', 'notes'], 'readwrite');
+      ['kv', 'highlights', 'notes'].forEach(function (n) { var s = t.objectStore(n); Object.keys(obj[n] || {}).forEach(function (k) { s.put(obj[n][k], k); }); });
+      t.oncomplete = res; t.onerror = function () { rej(t.error); };
+    }); });
+  }
+
+  /* ---------- pacotes de conteúdo ---------- */
+  var manifest = null, pkgBy = {};
+  function indexManifest() { pkgBy = {}; (manifest.packages || []).forEach(function (p) { pkgBy[p.path] = p; }); }
+  async function loadPackage(entry, offlineOnly) {
+    var c = await caches.open(CONTENT);
+    var hit = await c.match(entry.path);
+    if (hit) {
+      var hb = new Uint8Array(await hit.clone().arrayBuffer());
+      if ((await core.verifyPackage(hb, entry)).ok) return JSON.parse(new TextDecoder().decode(hb));
+      await c.delete(entry.path); // cópia local corrompida: descarta só ela e baixa de novo
+    }
+    if (offlineOnly) throw new Error('não está neste aparelho');
+    var r;
+    try { r = await fetch(entry.path, { cache: 'no-store' }); } catch (e) { throw new Error('Sem internet e este conteúdo ainda não foi baixado. Use "Baixar para ler sem internet" quando estiver conectado.'); }
+    if (!r.ok) throw new Error('Não foi possível carregar este conteúdo. Tente de novo em instantes.');
+    var bytes = new Uint8Array(await r.clone().arrayBuffer());
+    var v = await core.verifyPackage(bytes, entry);
+    if (!v.ok) throw new Error('Conteúdo recusado: não confere com o manifesto (' + v.reason + ').');
+    await c.put(entry.path, r);
+    return JSON.parse(new TextDecoder().decode(bytes));
+  }
+  async function syncManifest() {
+    var c = await caches.open(CONTENT);
+    var stored = null, s = await c.match('content-manifest.json');
+    if (s) { try { stored = await s.json(); } catch (e) { stored = null; } }
+    var incoming = null;
+    try { var r = await fetch('content-manifest.json', { cache: 'no-store' }); if (r.ok) incoming = await r.json(); } catch (e) { /* offline */ }
+    if (!incoming) return stored;
+    var cached = (await c.keys()).map(function (rq) { return relPath(rq.url); }).filter(function (p) { return p.indexOf('content/') === 0; });
+    var plan = core.planUpdate(stored, incoming, cached);
+    if (plan.accept) {
+      for (var i = 0; i < plan.remove.length; i++) await c.delete(plan.remove[i]);
+      await c.put('content-manifest.json', new Response(JSON.stringify(incoming), { headers: { 'content-type': 'application/json' } }));
+      return incoming;
+    }
+    return stored || incoming;
+  }
+
+  /* ---------- catálogo: 66 livros + livros de teste do manifesto ---------- */
+  function catalog() {
+    var avail = {}; manifest.bible.forEach(function (b) { avail[b.id] = b; });
+    var list = BK.all().map(function (b) {
+      var e = avail[b.id];
+      return { id: b.id, name: b.name, abbr: b.abbr, testament: b.testament, total: b.chapters, chapters: e ? e.chapters.map(function (c) { return c.n; }) : [], entry: e || null };
+    });
+    manifest.bible.forEach(function (b) {
+      if (!BK.byId(b.id)) list.unshift({ id: b.id, name: b.name, abbr: 'Teste', testament: 'at', total: b.chapters.length, chapters: b.chapters.map(function (c) { return c.n; }), entry: b });
+    });
+    return list;
+  }
+  function bookOf(id) { return catalog().filter(function (b) { return b.id === String(id); })[0] || null; }
+  function chapterEntry(b, n) { var c = b.entry && b.entry.chapters.filter(function (x) { return x.n === n; })[0]; return c ? pkgBy[c.path] : null; }
+  function firstAvailable() {
+    var l = catalog().filter(function (b) { return b.chapters.length; });
+    return l.length ? { book: l[0].id, chapter: Math.min.apply(null, l[0].chapters) } : null;
+  }
+  function passagesOf(bookId, n) { return (manifest.passages || []).filter(function (p) { return p.book === String(bookId) && p.chapter === n; }); }
+  function featured() {
+    var ps = manifest.passages || []; if (!ps.length) return null;
+    return ps[Math.floor(Date.now() / 864e5) % ps.length];
+  }
+  function resolveRef(ref) {
+    var p = core.parseRef(ref); if (!p) return null;
+    var q = core.normalize(p.name), found = null;
+    catalog().forEach(function (b) { if (core.normalize(b.name) === q || core.normalize(b.abbr) === q) found = b; });
+    if (!found || found.chapters.indexOf(p.chapter) < 0) return null;
+    return { book: found.id, chapter: p.chapter, verse: p.verse };
+  }
+
+  /* ---------- navegação (o botão voltar do Android funciona dentro do app) ---------- */
+  var curState = { v: 'home', d: 0 }, overlay = null;
+  var SCREENS = ['home', 'chap', 'read', 'study', 'search', 'marks', 'menu', 'err'];
+  function showScreen(v) {
+    SCREENS.forEach(function (x) { var s = $('#s-' + x); if (s) s.classList.toggle('on', x === v); });
+    var el = $('#s-' + v); if (el) el.scrollTop = 0;
+    $$('.nav button[data-tab="home"]').forEach(function (b) { if (v === 'home') b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+  }
+  function go(state, replace) {
+    var s = {}; Object.keys(state).forEach(function (k) { s[k] = state[k]; });
+    if (overlay) { hideOverlayUI(); overlay = null; s.d = curState.d + 1; history.replaceState(s, ''); }
+    else if (replace) { s.d = curState.d; history.replaceState(s, ''); }
+    else { s.d = curState.d + 1; history.pushState(s, ''); }
+    render(s);
+  }
+  function back() { if (curState.d > 0) history.back(); else go({ v: 'home' }, true); }
+  window.addEventListener('popstate', function (e) {
+    if (overlay) { hideOverlayUI(); overlay = null; return; }
+    var s = e.state && e.state.v ? e.state : { v: 'home', d: 0 };
+    render(s);
+  });
+  function render(s) {
+    curState = s;
+    try {
+      if (s.v === 'chap') viewChap(s); else if (s.v === 'read') viewRead(s); else if (s.v === 'study') viewStudy(s);
+      else if (s.v === 'search') viewSearch(); else if (s.v === 'marks') viewMarks(); else if (s.v === 'menu') viewMenu(); else viewHome();
+    } catch (e) { fail(e); }
+  }
+  function fail(e) {
+    var b = clear($('#errBody'));
+    b.appendChild(h('h2', { text: 'Algo não deu certo' })); b.appendChild(h('p', { text: e && e.message ? e.message : 'Erro inesperado.' }));
+    b.appendChild(h('button', { class: 'btn', type: 'button', text: 'Voltar ao início', onclick: function () { go({ v: 'home' }, true); } }));
+    showScreen('err');
+  }
+
+  /* overlays: menu lateral e janelas (um só nível de histórico) */
+  function openOverlay(kind) {
+    if (overlay) history.replaceState({ o: kind, d: curState.d }, ''); else history.pushState({ o: kind, d: curState.d + 1 }, '');
+    overlay = kind;
+  }
+  function hideOverlayUI() { $('#drawerBg').classList.remove('on'); $('#modalBg').hidden = true; clear($('#mBody')); }
+  function closeOverlay() { if (overlay) history.back(); }
+  function openDrawer() { hideOverlayUI(); openOverlay('drawer'); $('#drawerBg').classList.add('on'); }
+  function modal(nodes) {
+    var m = clear($('#mBody')); nodes.forEach(function (n) { m.appendChild(n); });
+    $('#drawerBg').classList.remove('on'); $('#modalBg').hidden = false; openOverlay('modal');
+    var f = $('#mClose'); if (f) f.focus();
+  }
+  function mtag(t, first) { return h('div', { class: 'mtag', style: first ? 'margin-top:30px' : null, text: t }); }
+
+  /* ---------- início ---------- */
+  var testament = 'at';
+  function drawBooks() {
+    var g = clear($('#bgrid'));
+    catalog().filter(function (b) { return b.testament === testament; }).forEach(function (b) {
+      var have = b.chapters.length > 0;
+      g.appendChild(h('button', { class: 'bk', type: 'button', 'aria-disabled': have ? 'false' : 'true', 'aria-label': b.name + (have ? '' : ', sem conteúdo neste aparelho'),
+        onclick: function () { if (have) go({ v: 'chap', b: b.id }); else toast('O texto de ' + b.name + ' ainda não foi incluído no app.'); } },
+        [h('b', { text: b.abbr }), h('span', { text: b.name })]));
+    });
+  }
+  async function viewHome() {
+    showScreen('home');
+    $('#testbar').hidden = manifest.production !== false;
+    drawBooks();
+    var last = await kvGet('onde-parei'), first = firstAvailable(), r = $('#resume');
+    if (last && bookOf(last.book)) { r.hidden = false; $('#resumeEb').textContent = 'Continuar leitura'; $('#resumeTxt').textContent = last.label; r.onclick = function () { go({ v: 'read', b: last.book, c: last.chapter }); }; }
+    else if (first) { var fb = bookOf(first.book); r.hidden = false; $('#resumeEb').textContent = 'Começar a leitura'; $('#resumeTxt').textContent = fb.name + ' ' + first.chapter; r.onclick = function () { go({ v: 'read', b: first.book, c: first.chapter }); }; }
+    else r.hidden = true;
+    var f = featured(); $('#cardStudy').hidden = !f; $('#railSec').hidden = false;
+    if (f) {
+      try {
+        var p = await loadPackage(pkgBy[f.path]);
+        if (p.pergunta) { $('#qEyebrow').textContent = 'Para pensar antes de ler'; $('#qTitle').textContent = p.pergunta; $('#qText').textContent = 'Uma pergunta para abrir o coração antes de ler ' + f.ref + '.'; }
+      } catch (e) { /* sem rede e sem cache: fica o texto padrão */ }
+    }
+  }
+  function actRead() { kvGet('onde-parei').then(function (last) { var f = firstAvailable(); if (last && bookOf(last.book)) go({ v: 'read', b: last.book, c: last.chapter }); else if (f) go({ v: 'read', b: f.book, c: f.chapter }); else toast('Ainda não há texto bíblico neste aparelho.'); }); }
+  function actStudy() { var f = featured(); if (f) go({ v: 'study', id: f.id }); else toast('Ainda não há ensino publicado neste aparelho.'); }
+
+  /* ---------- capítulos ---------- */
+  function viewChap(s) {
+    var b = bookOf(s.b); if (!b) return go({ v: 'home' }, true);
+    showScreen('chap'); $('#chapTitle').textContent = b.name;
+    var g = clear($('#chapgrid'));
+    for (var n = 1; n <= b.total; n++) (function (n) {
+      var ok = b.chapters.indexOf(n) >= 0;
+      g.appendChild(h('button', { type: 'button', text: String(n), 'aria-label': 'Capítulo ' + n + (ok ? '' : ', sem conteúdo'), 'aria-disabled': ok ? 'false' : 'true',
+        onclick: function () { if (ok) go({ v: 'read', b: b.id, c: n }); else toast('Este capítulo ainda não foi incluído no app.'); } }));
+    })(n);
+  }
+
+  /* ---------- leitura ---------- */
+  async function viewRead(s) {
+    var b = bookOf(s.b); if (!b) return go({ v: 'home' }, true);
+    var entry = chapterEntry(b, s.c); if (!entry) return go({ v: 'chap', b: b.id }, true);
+    showScreen('read'); $('#readTitle').textContent = b.name + ' ' + s.c;
+    var box = clear($('#rtext')); clear($('#studyList'));
+    box.appendChild(h('p', { class: 'empty', text: 'Carregando…' }));
+    var avail = b.chapters.slice().sort(function (x, y) { return x - y; }), i = avail.indexOf(s.c);
+    var prev = $('#chPrev'), next = $('#chNext');
+    prev.hidden = i <= 0; next.hidden = i >= avail.length - 1;
+    prev.onclick = function () { go({ v: 'read', b: b.id, c: avail[i - 1] }, true); };
+    next.onclick = function () { go({ v: 'read', b: b.id, c: avail[i + 1] }, true); };
+    var pkg;
+    try { pkg = await loadPackage(entry); }
+    catch (e) {
+      clear(box);
+      box.appendChild(h('div', { class: 'err' }, [h('p', { text: e.message }), h('button', { class: 'btn', type: 'button', text: 'Tentar de novo', onclick: function () { viewRead(s); } })]));
+      return;
+    }
+    if (curState !== s) return; // o usuário já foi para outra tela
+    kvSet('onde-parei', { book: b.id, chapter: s.c, label: b.name + ' ' + s.c });
+    var marks = await hlAll();
+    clear(box);
+    pkg.verses.forEach(function (v) {
+      var key = b.id + ':' + s.c + ':' + v.n;
+      var btn = h('button', { class: 'v', type: 'button', 'data-n': String(v.n), 'aria-pressed': marks[key] ? 'true' : 'false', 'aria-label': 'Versículo ' + v.n + '. Toque para destacar.' },
+        [h('sup', { text: String(v.n) }), h('span', { text: v.t })]);
+      btn.addEventListener('click', function () {
+        var on = btn.getAttribute('aria-pressed') !== 'true';
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false'); hlSet(key, on); toast(on ? 'Versículo destacado' : 'Destaque removido');
+      });
+      box.appendChild(btn);
+    });
+    passagesOf(b.id, s.c).forEach(function (p) {
+      $('#studyList').appendChild(h('button', { class: 'entender', type: 'button', style: '--img:url(assets/hero-bible.jpg)', onclick: function () { go({ v: 'study', id: p.id }); } },
+        [h('span', {}, [h('span', { class: 'eb', text: 'Ensino do app' }), h('strong', { text: 'Entender ' + p.ref })]), h('span', { class: 'cta', style: 'min-height:40px', text: 'Abrir' })]));
+    });
+    if (s.verse) { var t = $('.v[data-n="' + s.verse + '"]', box); if (t) { t.scrollIntoView({ block: 'center' }); t.classList.add('flash'); } }
+  }
+
+  /* ---------- estudo em camadas ---------- */
+  async function viewStudy(s) {
+    var meta = (manifest.passages || []).filter(function (p) { return p.id === s.id; })[0];
+    if (!meta) return go({ v: 'home' }, true);
+    showScreen('study'); $('#studyTitle').textContent = meta.ref;
+    var tabs = clear($('#depth')), panels = clear($('#panels'));
+    panels.appendChild(h('p', { class: 'empty', text: 'Carregando…' }));
+    var p;
+    try { p = await loadPackage(pkgBy[meta.path]); }
+    catch (e) { clear(panels); panels.appendChild(h('div', { class: 'err' }, [h('p', { text: e.message }), h('button', { class: 'btn', type: 'button', text: 'Tentar de novo', onclick: function () { viewStudy(s); } })])); return; }
+    if (curState !== s) return;
+    var refs = (p.refs || []).map(function (r) { return { text: r, to: resolveRef(r) }; }).filter(function (r) { return r.to; });
+    var shown = core.visibleTabs({ verses: p.verses, entender: p.entender, ligar: p.ligar, refs: refs });
+    var NAMES = { ler: 'Ler', entender: 'Entender', ligar: 'Ligar ao evangelho', aprofundar: 'Aprofundar' };
+    var stamp = function () {
+      var ic = h('span', { 'aria-hidden': 'true' }); ic.innerHTML = SHIELD; /* SVG fixo do próprio app, sem dados externos */
+      return h('div', { class: 'stamp' }, [ic, h('span', { text: core.stampText(p) })]);
+    };
+    var build = {
+      ler: function () {
+        var n = [];
+        if (p.pergunta) n.push(h('div', { class: 'pergunta' }, [h('b', { text: 'Para pensar antes de ler' }), h('p', { text: p.pergunta })]));
+        n.push(h('span', { class: 'tag', text: 'Texto bíblico' }));
+        n.push(h('div', { class: 'text' }, p.verses.map(function (v) { return h('span', { class: 'v' }, [h('sup', { text: String(v.n) }), h('span', { text: v.t })]); })));
+        return n;
+      },
+      entender: function () {
+        return [h('span', { class: 'tag app', text: 'Ensino do app' }),
+          h('div', { class: 'cardx study' }, String(p.entender).split(/\n\s*\n/).map(function (t) { return h('p', { text: t.trim(), style: 'margin-bottom:10px' }); })), stamp()];
+      },
+      ligar: function () {
+        return [h('span', { class: 'tag app', text: 'Ensino do app' }),
+          h('div', { class: 'seal' }, [h('b', { text: p.ligar.selo === true ? 'Cristo neste texto' : 'Ligar ao evangelho' }), h('p', { text: p.ligar.texto })]), stamp()];
+      },
+      aprofundar: function () {
+        return [h('span', { class: 'tag', text: 'Texto bíblico' }),
+          h('div', { class: 'cardx study' }, [h('p', { text: 'Toque para ler a outra passagem. O botão voltar traz você de volta aqui.', style: 'margin-bottom:12px' }),
+            h('div', { class: 'refs' }, refs.map(function (r) { return h('button', { class: 'ref', type: 'button', text: r.text, onclick: function () { go({ v: 'read', b: r.to.book, c: r.to.chapter, verse: r.to.verse }); } }); }))])];
+      }
+    };
+    clear(panels);
+    shown.forEach(function (name, i) {
+      tabs.appendChild(h('button', { class: 'dtab', type: 'button', role: 'tab', 'aria-selected': i === 0 ? 'true' : 'false', 'data-p': name, text: NAMES[name], onclick: function () { select(name); } }));
+      var pn = h('div', { class: 'panel study' + (i === 0 ? ' on' : ''), id: 'p-' + name, role: 'tabpanel' }, build[name]());
+      panels.appendChild(pn);
+    });
+    function select(name) {
+      $$('.dtab', tabs).forEach(function (t) { t.setAttribute('aria-selected', String(t.dataset.p === name)); });
+      $$('.panel', panels).forEach(function (x) { x.classList.toggle('on', x.id === 'p-' + name); });
+    }
+  }
+
+  /* ---------- busca ---------- */
+  var searchToken = 0;
+  function viewSearch() { showScreen('search'); var q = $('#q'); setTimeout(function () { q.focus(); }, 60); if (q.value) runSearch(q.value); }
+  function snippet(text, m) {
+    var from = Math.max(0, m.start - 40), to = Math.min(text.length, m.end + 60), out = [];
+    if (from > 0) out.push('…');
+    out.push(text.slice(from, m.start)); out.push(h('mark', { text: text.slice(m.start, m.end) })); out.push(text.slice(m.end, to));
+    if (to < text.length) out.push('…');
+    return out;
+  }
+  async function runSearch(raw) {
+    var token = ++searchToken, q = raw.trim(), box = clear($('#results'));
+    if (q.length < 2) return;
+    var list = h('div', { class: 'list' });
+    var nq = core.normalize(q);
+    catalog().filter(function (b) { return core.normalize(b.name).indexOf(nq) >= 0 || core.normalize(b.abbr) === nq; }).slice(0, 8).forEach(function (b) {
+      list.appendChild(h('button', { class: 'item', type: 'button', onclick: function () { if (b.chapters.length) go({ v: 'chap', b: b.id }); else toast('O texto de ' + b.name + ' ainda não foi incluído no app.'); } }, [h('strong', { text: b.name }), h('small', { text: b.chapters.length ? 'Livro' : 'Sem conteúdo neste aparelho' })]));
+    });
+    var info = h('p', { class: 'count', text: 'Buscando…' });
+    box.appendChild(list); box.appendChild(info);
+    var hits = h('div', { class: 'list', style: 'margin-top:8px' }); box.appendChild(hits);
+    var chapters = [];
+    catalog().forEach(function (b) { b.chapters.slice().sort(function (x, y) { return x - y; }).forEach(function (n) { var e = chapterEntry(b, n); if (e) chapters.push({ b: b, n: n, e: e }); }); });
+    var searched = 0, found = 0, LIMIT = 40;
+    for (var i = 0; i < chapters.length && found < LIMIT; i++) {
+      if (token !== searchToken) return;
+      var c = chapters[i], pkg;
+      try { pkg = await loadPackage(c.e, true); } catch (e) { continue; }
+      searched++;
+      for (var k = 0; k < pkg.verses.length && found < LIMIT; k++) {
+        var m = core.findMatch(pkg.verses[k].t, q);
+        if (m) { found++; (function (c, v, m) {
+          hits.appendChild(h('button', { class: 'hit', type: 'button', onclick: function () { go({ v: 'read', b: c.b.id, c: c.n, verse: v.n }); } }, [h('strong', { text: c.b.name + ' ' + c.n + ':' + v.n }), h('span', {}, snippet(v.t, m))]));
+        })(c, pkg.verses[k], m); }
+      }
+    }
+    if (token !== searchToken) return;
+    var total = chapters.length;
+    info.textContent = found ? found + (found >= LIMIT ? '+ resultados no texto' : ' resultado(s) no texto') + '. Capítulos pesquisados neste aparelho: ' + searched + ' de ' + total + '.'
+      : (list.children.length ? '' : 'Nada encontrado para "' + q + '". ') + 'Capítulos pesquisados neste aparelho: ' + searched + ' de ' + total + '.' + (searched < total ? ' Use "Baixar para ler sem internet" para pesquisar em tudo.' : '');
+  }
+
+  /* ---------- minha palavra (destaques) ---------- */
+  async function viewMarks() {
+    showScreen('marks');
+    var body = clear($('#marksBody'));
+    var keys = Object.keys(await hlAll());
+    if (!keys.length) {
+      body.appendChild(h('div', { class: 'empty' }, [h('p', { text: 'Você ainda não destacou nenhum versículo. Toque em um versículo durante a leitura para guardá-lo aqui.' }), h('button', { class: 'btn', type: 'button', text: 'Ir ler', onclick: actRead })]));
+      return;
+    }
+    var order = {}; catalog().forEach(function (b, i) { order[b.id] = i; });
+    var items = keys.map(function (k) { var p = k.split(':'); return { b: p[0], c: parseInt(p[1], 10), v: parseInt(p[2], 10) }; })
+      .filter(function (x) { return bookOf(x.b); })
+      .sort(function (a, b) { return (order[a.b] - order[b.b]) || (a.c - b.c) || (a.v - b.v); });
+    body.appendChild(h('p', { class: 'count', text: items.length + ' versículo(s) destacado(s)' }));
+    var list = h('div', { class: 'list' }); body.appendChild(list);
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i], bk = bookOf(it.b), text = '';
+      try { var e = chapterEntry(bk, it.c); if (e) { var pkg = await loadPackage(e, true); var vv = pkg.verses.filter(function (x) { return x.n === it.v; })[0]; if (vv) text = vv.t; } } catch (x) { /* sem o texto neste aparelho */ }
+      (function (it, bk, text) {
+        list.appendChild(h('button', { class: 'hit', type: 'button', onclick: function () { go({ v: 'read', b: it.b, c: it.c, verse: it.v }); } }, [h('strong', { text: bk.name + ' ' + it.c + ':' + it.v }), text ? h('span', { text: text }) : null]));
+      })(it, bk, text);
+    }
+  }
+
+  /* ---------- configurações ---------- */
+  var dlState = '';
+  async function refreshMenuInfo() {
+    try {
+      var c = await caches.open(CONTENT), have = (await c.keys()).map(function (r) { return relPath(r.url); });
+      var need = core.missingPackages(manifest, have).length, total = manifest.packages.length;
+      dlState = need === 0 ? 'Tudo baixado' : (total - need) + ' de ' + total;
+      $('#dlSmall').textContent = dlState;
+    } catch (e) { $('#dlSmall').textContent = ''; }
+    var est = '';
+    try { if (navigator.storage && navigator.storage.estimate) { var e = await navigator.storage.estimate(); est = 'Armazenamento usado: ' + Math.round((e.usage || 0) / 1024 / 1024 * 10) / 10 + ' MB de ' + Math.round((e.quota || 0) / 1024 / 1024) + ' MB.'; } } catch (x) { est = ''; }
+    $('#storeInfo').textContent = est;
+    var pst = '';
+    try { if (navigator.storage && navigator.storage.persisted) pst = (await navigator.storage.persisted()) ? 'Protegido' : 'Não protegido'; } catch (x) { pst = ''; }
+    $('#persistSmall').textContent = pst;
+  }
+  function viewMenu() { showScreen('menu'); refreshInstall(); refreshMenuInfo(); }
+
+  /* ---------- instalar e compartilhar ---------- */
+  var deferred = null;
+  function isStandalone() { return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; }
+  function refreshInstall() { var b = $('#inst'); if (!b) return; b.textContent = isStandalone() ? '✓ Instalado' : 'Instalar app'; $('#instHint').hidden = isStandalone(); }
+  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferred = e; refreshInstall(); });
+  window.addEventListener('appinstalled', function () { deferred = null; toast('App instalado'); refreshInstall(); });
+  function installHelp() {
+    modal([mtag('Instalar', true), h('h2', { text: 'Instalar aplicativo' }),
+      h('p', {}, ['No Android, abra o menu do Chrome (três pontos) e escolha ', h('b', { text: 'Instalar aplicativo' }), ' ou ', h('b', { text: 'Adicionar à tela inicial' }), '. Depois disso o Palavra Viva abre como um aplicativo e funciona sem internet.'])]);
+  }
+  function install() {
+    if (isStandalone()) { toast('O app já está instalado.'); return; }
+    if (deferred) { var d = deferred; deferred = null; d.prompt(); d.userChoice.then(refreshInstall, refreshInstall); } else installHelp();
+  }
+  function share() {
+    var url = cfg.siteUrl || (location.origin + location.pathname);
+    if (navigator.share) navigator.share({ title: 'Palavra Viva', text: 'Bíblia em português, grátis e sem internet.', url: url }).catch(function () { /* cancelado */ });
+    else copy(url, 'Link copiado');
+  }
+
+  /* ---------- baixar tudo ---------- */
+  async function downloadAll(cb) {
+    var c = await caches.open(CONTENT);
+    var have = (await c.keys()).map(function (r) { return relPath(r.url); });
+    var need = core.missingPackages(manifest, have), total = manifest.packages.length, done = total - need.length, fails = 0, i = 0;
+    cb(done, total);
+    async function worker() {
+      while (i < need.length) {
+        var e = need[i++];
+        try {
+          var r = await fetch(e.path, { cache: 'no-store' }); if (!r.ok) throw new Error('http');
+          var bytes = new Uint8Array(await r.clone().arrayBuffer());
+          if (!(await core.verifyPackage(bytes, e)).ok) throw new Error('hash');
+          await c.put(e.path, r); done++;
+        } catch (x) { fails++; }
+        cb(done, total);
+      }
+    }
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    for (var m = 0; m < (cfg.audio || []).length; m++) { try { await mediaResponse(cfg.audio[m]); } catch (x) { /* áudio é opcional */ } }
+    if (!fails) { kvSet('baixado', { generation: manifest.generation, at: Date.now() }); try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (x) { /* ignora */ } }
+    return { done: done, total: total, fails: fails };
+  }
+  function downloadModal() {
+    var bar = h('i', { id: 'pbar' }), txt = h('p', { class: 'dlstat', id: 'ptxt', text: 'Calculando…' });
+    var go1 = h('button', { class: 'big', type: 'button', id: 'pgo', text: 'Baixar agora' });
+    modal([mtag('Leitura sem internet', true), h('h2', { text: 'Baixar tudo' }), h('p', { style: 'text-align:center', text: 'O texto bíblico e o ensino ficam guardados no aparelho. Você poderá ler no modo avião.' }), h('div', { class: 'prog' }, [bar]), txt, go1]);
+    var show = function (d, t) { bar.style.width = (t ? d / t * 100 : 0) + '%'; txt.textContent = d + ' de ' + t + ' partes guardadas'; };
+    caches.open(CONTENT).then(function (c) { return c.keys(); }).then(function (ks) {
+      var have = ks.map(function (r) { return relPath(r.url); }), t = manifest.packages.length, n = t - core.missingPackages(manifest, have).length;
+      show(n, t); if (n === t) { go1.textContent = 'Tudo já está no aparelho'; go1.disabled = true; go1.style.opacity = '.7'; }
+    });
+    go1.onclick = function () {
+      go1.disabled = true; go1.style.opacity = '.6'; go1.textContent = 'Baixando…';
+      downloadAll(show).then(function (r) {
+        go1.style.opacity = '1';
+        if (r.fails) { go1.disabled = false; go1.textContent = 'Faltaram ' + r.fails + '. Tentar de novo'; }
+        else { go1.textContent = 'Pronto: já funciona sem internet'; }
+        refreshMenuInfo();
+      }, function () { go1.disabled = false; go1.style.opacity = '1'; go1.textContent = 'Não deu certo. Tentar de novo'; });
+    };
+  }
+
+  /* ---------- sobre, contato, abençoe ---------- */
+  function row(dt, dd) { return h('div', {}, [h('dt', { text: dt }), h('dd', { text: dd })]); }
+  function aboutModal() {
+    var lic = manifest.license || {}, owner = cfg.ownerName || 'o responsável pelo projeto', yr = cfg.year || String(new Date().getFullYear());
+    var dl = h('dl', {}, [
+      row('Projeto', 'Palavra Viva, Bíblia de Estudos. Gratuito, sem anúncios e sem coleta de dados.'),
+      cfg.ownerName ? row('Responsável', cfg.ownerName) : null,
+      row('Texto bíblico e referências', lic.text || ''),
+      row('Ensino do app', 'Não é a Bíblia. Gerado por IA e conferido por outras IAs; só o selo "Revisado por pessoa" indica revisão humana.'),
+      row('Direitos', '© ' + yr + ' ' + owner + '. Todos os direitos reservados ao ensino e ao aplicativo; o texto bíblico segue a licença acima.'),
+      row('Versão', 'App ' + APP_VERSION + ' · conteúdo ' + manifest.contentVersion + ' (geração ' + manifest.generation + ')')
+    ]);
+    var nodes = [mtag('Palavra Viva', true), h('h2', { text: 'Sobre' }), dl];
+    if (lic.url) nodes.push(h('p', {}, [h('a', { href: lic.url, rel: 'noopener', target: '_blank', text: 'Ver a licença do texto' })]));
+    modal(nodes);
+  }
+  function contactModal() {
+    var mail = cfg.contactEmail;
+    modal([mtag('Fale conosco', true), h('h2', { text: 'Contato e suporte' }), h('p', { style: 'text-align:center', text: 'Para dúvidas, sugestões ou suporte, escreva para:' }),
+      h('p', { style: 'text-align:center' }, [h('a', { href: 'mailto:' + mail, text: mail })]),
+      h('button', { class: 'big', type: 'button', text: 'Copiar e-mail', onclick: function () { copy(mail, 'E-mail copiado'); } })]);
+  }
+  function blessModal() {
+    var img = h('div', { class: 'mimg' }), probe = new Image();
+    probe.onload = function () { img.style.setProperty('--img', 'url(assets/abencoe.jpg)'); };
+    probe.onerror = function () { img.style.setProperty('--img', 'url(assets/hero-reading.jpg)'); };
+    probe.src = 'assets/abencoe.jpg';
+    modal([img, mtag('Um gesto de continuidade'), h('h2', { text: 'Abençoe este Projeto' }),
+      h('p', { text: 'O Palavra Viva nasceu para tornar a Palavra mais próxima, simples e presente na vida de cada pessoa.' }),
+      h('p', { text: 'Se este projeto tem edificado sua caminhada, você pode contribuir voluntariamente para ele continuar crescendo e alcançando outras vidas.' }),
+      h('span', { class: 'note', text: 'Cada apoio é recebido com gratidão.' }),
+      mtag('Contribuição voluntária via Pix'),
+      h('button', { class: 'big', type: 'button', text: 'Copiar chave Pix', onclick: function () { copy(cfg.pixKey, 'Chave Pix copiada'); } }),
+      h('p', { style: 'text-align:center;font-size:12px;color:var(--soft);margin-top:8px', text: 'A chave não aparece na tela: ela é copiada para você colar no aplicativo do seu banco.' })]);
+  }
+
+  /* ---------- áudio ambiente: música do projeto se existir; senão, um pad suave sintetizado ---------- */
+  var aud = { on: false, el: null, url: null, ctx: null, master: null, oscs: [] };
+  function volume() { return $('#vol').value / 100; }
+  async function mediaResponse(src) {
+    var c = await caches.open(MEDIA), r = await c.match(src);
+    if (!r) { r = await fetch(src); if (!r.ok) throw new Error('sem arquivo'); await c.put(src, r.clone()); }
+    return r;
+  }
+  function startSynth() {
+    var C = window.AudioContext || window.webkitAudioContext; if (!C) return false;
+    aud.ctx = aud.ctx || new C(); if (aud.ctx.state === 'suspended') aud.ctx.resume();
+    var ac = aud.ctx; aud.master = ac.createGain(); aud.master.gain.value = 0;
+    var lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900; aud.master.connect(lp); lp.connect(ac.destination);
+    [130.81, 196, 261.63, 329.63].forEach(function (f, i) {
+      var o = ac.createOscillator(); o.type = 'sine'; o.frequency.value = f;
+      var g = ac.createGain(); g.gain.value = 0.12 / (1 + i * 0.4);
+      var l = ac.createOscillator(); l.frequency.value = 0.07 + i * 0.03; var lg = ac.createGain(); lg.gain.value = 0.05; l.connect(lg); lg.connect(g.gain);
+      o.connect(g); g.connect(aud.master); o.start(); l.start(); aud.oscs.push(o, l);
+    });
+    aud.master.gain.linearRampToValueAtTime(volume() * 0.8, ac.currentTime + 2.5);
+    return true;
+  }
+  async function startAudio() {
+    var src = cfg.audio && cfg.audio[0];
+    if (src) {
+      try {
+        var blob = await (await mediaResponse(src)).blob();
+        aud.url = URL.createObjectURL(blob); aud.el = new Audio(aud.url); aud.el.loop = true; aud.el.volume = volume();
+        await aud.el.play(); return true;
+      } catch (e) { if (aud.el) { aud.el.pause(); aud.el = null; } if (aud.url) { URL.revokeObjectURL(aud.url); aud.url = null; } }
+    }
+    return startSynth();
+  }
+  function stopAudio() {
+    if (aud.el) { aud.el.pause(); aud.el = null; }
+    if (aud.url) { URL.revokeObjectURL(aud.url); aud.url = null; }
+    if (aud.master && aud.ctx) {
+      aud.master.gain.linearRampToValueAtTime(0, aud.ctx.currentTime + 1);
+      var o = aud.oscs, m = aud.master; aud.oscs = []; aud.master = null;
+      setTimeout(function () { o.forEach(function (x) { try { x.stop(); } catch (e) { /* já parou */ } }); try { m.disconnect(); } catch (e) { /* ok */ } }, 1200);
+    }
+  }
+  function bindAudio() {
+    $('#sw').addEventListener('click', async function () {
+      var s = $('#sw'), want = s.getAttribute('aria-checked') !== 'true';
+      if (want) { s.disabled = true; var ok = await startAudio(); s.disabled = false; if (!ok) { toast('Este aparelho não tocou o áudio.'); return; } } else stopAudio();
+      aud.on = want; s.setAttribute('aria-checked', String(want)); $('#audState').textContent = want ? 'Tocando baixinho enquanto você lê' : 'Desligada';
+    });
+    $('#vol').value = lsGet('pv4-vol', '40');
+    $('#vol').addEventListener('input', function () {
+      lsSet('pv4-vol', $('#vol').value);
+      if (aud.el) aud.el.volume = volume();
+      if (aud.master && aud.ctx) aud.master.gain.linearRampToValueAtTime(volume() * 0.8, aud.ctx.currentTime + 0.1);
+    });
+  }
+
+  /* ---------- atualização do app (botão "Atualizar", sem skipWaiting automático) ---------- */
+  function setupSW() {
+    if (!('serviceWorker' in navigator)) return;
+    var banner = $('#update');
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(function (reg) {
+      function offer(w) { banner.hidden = false; $('#do-update').onclick = function () { w.postMessage({ type: 'SKIP_WAITING' }); }; }
+      if (reg.waiting && navigator.serviceWorker.controller) offer(reg.waiting);
+      reg.addEventListener('updatefound', function () {
+        var w = reg.installing; if (!w) return;
+        w.addEventListener('statechange', function () { if (w.state === 'installed' && navigator.serviceWorker.controller) offer(w); });
+      });
+      reg.update().catch(function () { /* offline */ });
+      document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') reg.update().catch(function () { /* offline */ }); });
+    }).catch(function () { /* sem service worker: o app continua funcionando online */ });
+    var reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function () { if (reloaded) return; reloaded = true; location.reload(); });
+  }
+
+  /* ---------- ligações dos elementos fixos ---------- */
+  function bindStatic() {
+    var splash = $('#splash');
+    function hideSplash() { splash.classList.add('off'); ssSet('pv4-splash', '1'); }
+    if (ssGet('pv4-splash')) splash.classList.add('off'); else { setTimeout(hideSplash, 2400); splash.addEventListener('click', hideSplash); splash.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') hideSplash(); }); }
+
+    $('#menuBtn').addEventListener('click', openDrawer);
+    $('#dClose').addEventListener('click', closeOverlay);
+    $('#drawerBg').addEventListener('click', function (e) { if (e.target.id === 'drawerBg') closeOverlay(); });
+    $('#mClose').addEventListener('click', closeOverlay);
+    $('#modalBg').addEventListener('click', function (e) { if (e.target.id === 'modalBg') closeOverlay(); });
+    $$('.nav button').forEach(function (b) { b.addEventListener('click', function () { if (b.dataset.tab === 'drawer') openDrawer(); else if (curState.v === 'home') $('#s-home').scrollTo({ top: 0, behavior: 'smooth' }); else go({ v: 'home' }); }); });
+    $$('[data-back]').forEach(function (b) { b.addEventListener('click', back); });
+    var sl = $('#slides'), dots = $$('#dots i');
+    function cur() { return Math.round(sl.scrollLeft / sl.clientWidth); }
+    sl.addEventListener('scroll', function () { var i = cur(); dots.forEach(function (d, k) { d.classList.toggle('on', k === i); }); });
+    $('#prev').addEventListener('click', function () { sl.scrollTo({ left: Math.max(0, cur() - 1) * sl.clientWidth, behavior: 'smooth' }); });
+    $('#next').addEventListener('click', function () { sl.scrollTo({ left: Math.min(dots.length - 1, cur() + 1) * sl.clientWidth, behavior: 'smooth' }); });
+    $$('[data-act]').forEach(function (b) { b.addEventListener('click', function () { var a = b.dataset.act; if (a === 'read') actRead(); else if (a === 'study') actStudy(); else go({ v: 'marks' }); }); });
+    $$('.tt button').forEach(function (c) { c.addEventListener('click', function () { testament = c.dataset.t; $$('.tt button').forEach(function (x) { x.setAttribute('aria-pressed', String(x === c)); }); drawBooks(); }); });
+    $('#goSearch').addEventListener('click', function () { go({ v: 'search' }); });
+    var qt = null; $('#q').addEventListener('input', function (e) { clearTimeout(qt); var v = e.target.value; qt = setTimeout(function () { runSearch(v); }, 250); });
+    $('#fsz').addEventListener('click', function (e) { var s = e.target.closest('button'); if (!s) return; lsSet('pv4-fs', s.dataset.s); applyAppearance(); });
+    $('#thm').addEventListener('click', function (e) { var s = e.target.closest('button'); if (!s) return; lsSet('pv4-theme', s.dataset.m); applyAppearance(); });
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyAppearance);
+    $('#inst').addEventListener('click', install); $('#shr').addEventListener('click', share);
+    $('#dlbtn').addEventListener('click', downloadModal);
+    $('#expbtn').addEventListener('click', function () {
+      exportAll().then(function (o) {
+        var a = h('a', { href: URL.createObjectURL(new Blob([JSON.stringify(o)], { type: 'application/json' })), download: 'palavra-viva-backup.json' });
+        document.body.appendChild(a); a.click(); a.remove(); toast('Backup gerado');
+      }, function () { toast('Não foi possível gerar o backup.'); });
+    });
+    $('#impfile').addEventListener('change', function (e) {
+      var f = e.target.files && e.target.files[0]; if (!f) return;
+      f.text().then(function (t) { return importAll(JSON.parse(t)); }).then(function () { toast('Backup importado'); }, function (er) { toast(er.message || 'Arquivo inválido.'); });
+      e.target.value = '';
+    });
+    $('#persist').addEventListener('click', function () {
+      if (navigator.storage && navigator.storage.persist) navigator.storage.persist().then(function (ok) { toast(ok ? 'Dados protegidos' : 'O navegador não concedeu a proteção.'); refreshMenuInfo(); });
+      else toast('Este navegador não oferece essa proteção.');
+    });
+    $$('[data-d]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var d = b.dataset.d;
+        if (d === 'audio') { $('#audioPanel').scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+        if (d === 'cfg') go({ v: 'menu' });
+        else if (d === 'dl') downloadModal(); else if (d === 'inst') { if (isStandalone()) { closeOverlay(); toast('O app já está instalado.'); } else if (deferred) { closeOverlay(); install(); } else installHelp(); }
+        else if (d === 'shr') { closeOverlay(); share(); } else if (d === 'bless') blessModal(); else if (d === 'contact') contactModal(); else if (d === 'about') aboutModal();
+      });
+    });
+    bindAudio();
+    window.addEventListener('online', function () {
+      syncManifest().then(function (m) { if (m && manifest && m.generation !== manifest.generation) { manifest = m; indexManifest(); if (curState.v === 'home') render(curState); } }, function () { /* ok */ });
+    });
+  }
+
+  function fillRights() {
+    var t = cfg.ownerName ? '© ' + (cfg.year || new Date().getFullYear()) + ' ' + cfg.ownerName + ' · Todos os direitos reservados' : '';
+    ['rightsHome', 'rightsMenu'].forEach(function (id) { var e = $('#' + id); if (e) { e.textContent = t; e.hidden = !t; } });
+  }
+
+  /* ---------- partida ---------- */
+  (async function start() {
+    applyAppearance(); bindStatic(); refreshInstall();
+    await loadConfig();
+    fillRights();
+    $('#blessItem').hidden = !cfg.pixKey;
+    setupSW();
+    try {
+      manifest = await syncManifest();
+      if (!manifest) throw new Error('Sem conexão e sem conteúdo guardado. Abra o app uma vez com internet.');
+      indexManifest();
+      var s = history.state;
+      if (s && s.v && !s.o) curState = s; else { curState = { v: 'home', d: Math.max(0, ((s && s.d) || 1) - 1) }; history.replaceState(curState, ''); }
+      render(curState);
+    } catch (e) { fail(e); }
+  })();
+})();
+<<<END>>>
+
+<<<FILE config.json>>>
+{
+  "ownerName": "Anderson Pereira Cabral",
+  "year": "2026",
+  "contactEmail": "contato.palavravivabr@gmail.com",
+  "pixKey": "4d26bd31-2e0e-4f8c-ad90-43b5346efdea",
+  "siteUrl": "https://apcolx-lab.github.io/Palavra-viva-app/",
+  "audio": [
+    "assets/ambiente-leitura.mp3"
+  ]
+}
+<<<END>>>
+
+<<<FILE content-src/meta.json>>>
+{"contentVersion":"0.0.1-teste","production":false,"license":{"text":"Conteúdo de teste fictício, sem texto bíblico real.","url":""},"books":[{"id":"teste1","name":"Livro de Teste"}],"minGeneration":100}
+<<<END>>>
+
+<<<FILE content-src/biblia/teste/teste1-1.json>>>
+{"_teste":true,"book":"teste1","chapter":1,"verses":[{"n":1,"t":"Versículo fictício um do capítulo 1, apenas para testar o leitor."},{"n":2,"t":"Versículo fictício dois do capítulo 1, apenas para testar o leitor."},{"n":3,"t":"Versículo fictício três do capítulo 1, apenas para testar o leitor."},{"n":4,"t":"Versículo fictício quatro do capítulo 1, apenas para testar o leitor."},{"n":5,"t":"Versículo fictício cinco do capítulo 1, apenas para testar o leitor."},{"n":6,"t":"Versículo fictício seis do capítulo 1, apenas para testar o leitor."}]}
+<<<END>>>
+
+<<<FILE content-src/biblia/teste/teste1-2.json>>>
+{"_teste":true,"book":"teste1","chapter":2,"verses":[{"n":1,"t":"Versículo fictício um do capítulo 2, apenas para testar o leitor."},{"n":2,"t":"Versículo fictício dois do capítulo 2, apenas para testar o leitor."},{"n":3,"t":"Versículo fictício três do capítulo 2, apenas para testar o leitor."},{"n":4,"t":"Versículo fictício quatro do capítulo 2, apenas para testar o leitor."}]}
+<<<END>>>
+
+<<<FILE content-src/biblia/teste/teste1-3.json>>>
+{"_teste":true,"book":"teste1","chapter":3,"verses":[{"n":1,"t":"Versículo fictício um do capítulo 3, apenas para testar o leitor."},{"n":2,"t":"Versículo fictício dois do capítulo 3, apenas para testar o leitor."},{"n":3,"t":"Versículo fictício três do capítulo 3, apenas para testar o leitor."},{"n":4,"t":"Versículo fictício quatro do capítulo 3, apenas para testar o leitor."}]}
+<<<END>>>
+
+<<<FILE content-src/camada2/teste/teste1-1-1-3.json>>>
+{"_teste":true,"id":"teste1-1-1-3","ref":"Livro de Teste 1:1-3","book":"teste1","chapter":1,"verses":[{"n":1,"t":"Versículo fictício um do capítulo 1, apenas para testar o leitor."},{"n":2,"t":"Versículo fictício dois do capítulo 1, apenas para testar o leitor."},{"n":3,"t":"Versículo fictício três do capítulo 1, apenas para testar o leitor."}],"pergunta":"Pergunta de exemplo: o que muda quando você lê devagar?","entender":"Texto explicativo fictício para testar a aba Entender.\n\nSegundo parágrafo fictício, para testar a quebra de parágrafos.","ligar":{"texto":"Ligação fictícia para testar a aba Ligar ao evangelho."},"refs":["Livro de Teste 2:3","Livro de Teste 3:1","Gênesis 1:1"]}
+<<<END>>>
+
+<<<FILE content-src/camada2/teste/teste1-2-1-2.json>>>
+{"_teste":true,"id":"teste1-2-1-2","ref":"Livro de Teste 2:1-2","book":"teste1","chapter":2,"verses":[{"n":1,"t":"Versículo fictício um do capítulo 2, apenas para testar o leitor."},{"n":2,"t":"Versículo fictício dois do capítulo 2, apenas para testar o leitor."}],"entender":"Outro texto explicativo fictício.","ligar":{"texto":"Texto fictício com o selo Cristo neste texto.","selo":true},"pergunta":"Pergunta de exemplo dois: o que você leva deste trecho para hoje?"}
+<<<END>>>
+
+<<<FILE index.html>>>
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1F4D43">
+<meta name="author" content="Anderson Pereira Cabral">
+<meta name="description" content="Palavra Viva: Bíblia em português, gratuita e sem internet, com ensino em camadas.">
+<title>Palavra Viva</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<noscript><p style="padding:20px;font-family:sans-serif">O Palavra Viva precisa do JavaScript ligado para funcionar.</p></noscript>
+<div id="app">
+  <div id="splash" role="button" tabindex="0" aria-label="Tocar para continuar">
+    <div class="tile"><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M32 6c5 7 9 11 9 18a9 9 0 0 1-18 0c0-4 2-6 4-9 1 3 2 4 3 4 0-5-1-9 2-13Z" fill="#E3B96F"/><path d="M8 40c8-3 16-3 24 2 8-5 16-5 24-2v13c-8-3-16-3-24 2-8-5-16-5-24-2Z" fill="#F1E2B9" opacity=".95"/><path d="M32 42v13" stroke="#1b4a40" stroke-width="1.5"/></svg></div>
+    <b>PALAVRA VIVA</b><span class="n">Bíblia de Estudos</span><small>LEIA. ENTENDA. VIVA.</small><div class="ln"></div>
+  </div>
+
+  <div id="update" class="banner" hidden role="status"><span>Há uma versão nova do app.</span><button type="button" id="do-update">Atualizar</button></div>
+
+  <section class="screen on" id="s-home" aria-label="Início">
+    <div class="hero">
+      <button class="menubtn" id="menuBtn" type="button" aria-label="Abrir menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+      <div class="slides" id="slides">
+        <div class="slide" style="--img:url(assets/hero-bible.jpg)"><span class="eb">Leia a Bíblia</span><h1>Comece pela Palavra.</h1><p>Abra a Bíblia e encontre direção para o seu dia.</p><button class="cta" type="button" data-act="read">Ler agora &#8594;</button></div>
+        <div class="slide" style="--img:url(assets/hero-dawn.jpg)"><span class="eb" id="qEyebrow">Para pensar antes de ler</span><h1 id="qTitle">O que a Palavra tem a dizer ao seu dia?</h1><p id="qText">Uma pergunta para abrir o coração antes da leitura.</p><button class="cta" type="button" data-act="study" id="qBtn">Começar agora &#8594;</button></div>
+        <div class="slide" style="--img:url(assets/hero-reading.jpg)"><span class="eb">Minha Palavra</span><h1>Guarde o que Deus falou com você.</h1><p>Seus destaques ficam só no seu aparelho.</p><button class="cta" type="button" data-act="marks">Ver destaques &#8594;</button></div>
+      </div>
+      <div class="ctrl"><button id="prev" type="button" aria-label="Anterior"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button><div class="dots" id="dots"><i class="on"></i><i></i><i></i></div><button id="next" type="button" aria-label="Próximo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></button></div>
+    </div>
+    <div class="testbar" id="testbar" role="note" hidden>Modo teste: texto e ensino são exemplos fictícios. O conteúdo real chega em pacotes revisados.</div>
+    <div class="sec" id="railSec">
+      <span class="eyebrow">Escolha seu momento</span>
+      <div class="sechead"><h2>Continue no Palavra Viva</h2><span>Deslize &#8594;</span></div>
+      <div class="rail">
+        <button class="pcard" type="button" style="--img:url(assets/hero-dawn.jpg)" data-act="study" id="cardStudy"><span class="st"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c1 4 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 .2 1 .6 1.5 1 1.5C10 7 11 6 12 3Z"/></svg></span><span class="eb">Entender a passagem</span><strong>Quatro profundidades</strong><small>Ler, entender, ligar e aprofundar</small></button>
+        <button class="pcard" type="button" style="--img:url(assets/hero-reading.jpg)" data-act="marks"><span class="st"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.8 6.8 19.6l1-5.8L3.5 9.7l5.9-.9L12 3.5Z"/></svg></span><span class="eb">Minha Palavra</span><strong>Guarde o que falou com você</strong><small>Seus versículos destacados</small></button>
+      </div>
+    </div>
+    <button class="resume" type="button" id="resume" hidden><span class="t"><span class="eyebrow" id="resumeEb">Continuar leitura</span><strong id="resumeTxt"></strong></span><span class="ler">Ler</span></button>
+    <div class="bible">
+      <span class="eyebrow">Bíblia</span>
+      <h2>Escolha onde continuar</h2>
+      <div class="vers"><label for="ver">Versão bíblica</label><select id="ver" aria-label="Versão bíblica"><option>Bíblia Livre</option></select></div>
+      <button class="search" type="button" id="goSearch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Buscar livro ou palavra</button>
+      <div class="tt" role="group" aria-label="Testamento"><button type="button" aria-pressed="true" data-t="at">Antigo Testamento</button><button type="button" aria-pressed="false" data-t="nt">Novo Testamento</button></div>
+      <div class="bgrid" id="bgrid"></div>
+      <p class="rights" id="rightsHome" hidden></p>
+    </div>
+  </section>
+
+  <section class="screen" id="s-chap" aria-label="Capítulos">
+    <div class="topbar"><button class="back" type="button" data-back><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>Voltar</button><h2 id="chapTitle"></h2></div>
+    <div class="chapgrid" id="chapgrid"></div>
+  </section>
+
+  <section class="screen" id="s-read" aria-label="Leitura">
+    <div class="topbar"><button class="back" type="button" data-back><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>Voltar</button><h2 id="readTitle"></h2></div>
+    <div class="pad">
+      <span class="tag">Texto bíblico</span>
+      <div class="text" id="rtext"></div>
+      <div class="row2"><button type="button" id="chPrev">&#8592; Anterior</button><button type="button" id="chNext">Próximo &#8594;</button></div>
+      <div id="studyList" style="display:flex;flex-direction:column;gap:12px"></div>
+    </div>
+  </section>
+
+  <section class="screen" id="s-study" aria-label="Estudo">
+    <div class="topbar"><button class="back" type="button" data-back><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>Voltar</button><h2 id="studyTitle"></h2></div>
+    <div class="pad" style="padding-top:4px">
+      <div class="depth" role="tablist" aria-label="Profundidade" id="depth"></div>
+      <div id="panels" style="display:flex;flex-direction:column;gap:16px"></div>
+    </div>
+  </section>
+
+  <section class="screen" id="s-search" aria-label="Busca">
+    <div class="topbar"><button class="back" type="button" data-back><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>Voltar</button><h2>Buscar</h2></div>
+    <div class="pad"><label class="search" style="margin:0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Buscar livro ou palavra" aria-label="Buscar" autocomplete="off" enterkeyhint="search"></label><div id="results" aria-live="polite"></div></div>
+  </section>
+
+  <section class="screen" id="s-marks" aria-label="Minha Palavra">
+    <div class="topbar"><button class="back" type="button" data-back><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>Voltar</button><h2>Minha Palavra</h2></div>
+    <div class="pad" id="marksBody"></div>
+  </section>
+
+  <section class="screen" id="s-menu" aria-label="Configurações">
+    <div class="topbar"><button class="back" type="button" data-back><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>Voltar</button><h2>Configurações</h2></div>
+    <div class="set">
+      <div class="btnrow"><button class="b1" type="button" id="inst">Instalar app</button><button class="b2" type="button" id="shr">&#8599; Compartilhar</button></div>
+      <p class="hint" id="instHint">No Android, se o Chrome não oferecer a instalação, abra o menu e escolha Instalar aplicativo ou Adicionar à tela inicial.</p>
+      <div class="srow"><span>Tamanho do texto</span><span class="seg" id="fsz"><button type="button" aria-label="Menor" data-s="1">A</button><button type="button" aria-pressed="true" aria-label="Médio" data-s="1.125" style="font-size:1.1rem">A</button><button type="button" aria-label="Maior" data-s="1.35" style="font-size:1.3rem">A</button></span></div>
+      <div class="srow"><span>Tema</span><span class="seg" id="thm"><button type="button" data-m="auto" aria-pressed="true">Auto</button><button type="button" data-m="light">Claro</button><button type="button" data-m="dark">Escuro</button></span></div>
+      <button class="srow" type="button" id="dlbtn"><span>Baixar para ler sem internet</span><small id="dlSmall"></small></button>
+      <button class="srow" type="button" id="expbtn"><span>Exportar backup</span><small>JSON</small></button>
+      <label class="srow" for="impfile" style="cursor:pointer"><span>Importar backup</span><small>JSON</small><input type="file" id="impfile" class="filein" accept="application/json"></label>
+      <button class="srow" type="button" id="persist"><span>Proteger meus dados no aparelho</span><small id="persistSmall"></small></button>
+      <p class="hint" id="storeInfo"></p>
+      <a class="srow" href="reset.html"><span>Limpar cache do app</span><small>Abrir</small></a>
+      <p class="rights" id="rightsMenu" hidden></p>
+    </div>
+  </section>
+
+  <section class="screen" id="s-err" aria-label="Erro"><div class="err" id="errBody"></div></section>
+
+  <nav class="nav" aria-label="Navegação principal">
+    <button type="button" data-tab="home" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6c-2-1.5-5-2-8-1.5v13c3-.5 6 0 8 1.5 2-1.5 5-2 8-1.5v-13C17 4 14 4.5 12 6Z"/><path d="M12 6v13"/></svg>Início</button>
+    <button type="button" data-tab="drawer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>Menu</button>
+  </nav>
+
+  <div id="drawerBg"><div id="drawer" role="dialog" aria-modal="true" aria-label="Menu">
+    <div class="dh"><div><b>Palavra Viva</b><small>LEIA. ENTENDA. VIVA.</small></div><button class="xbtn" id="dClose" type="button" aria-label="Fechar">&times;</button></div>
+    <div class="drule"></div>
+    <button class="ditem" type="button" data-d="audio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/></svg>Áudio<i>&#8250;</i></button>
+    <button class="ditem" type="button" data-d="cfg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>Configurações<i>&#8250;</i></button>
+    <button class="ditem" type="button" data-d="dl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg>Baixar para ler sem internet<i>&#8250;</i></button>
+    <button class="ditem" type="button" data-d="inst"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="6" y="3" width="12" height="18" rx="2.5"/><path d="M11 17h2"/></svg>Instalar aplicativo<i>&#8250;</i></button>
+    <button class="ditem" type="button" data-d="shr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 17 17 7M9 7h8v8"/></svg>Compartilhar aplicativo<i>&#8250;</i></button>
+    <div class="panelx" id="audioPanel"><div class="eyebrow">Áudio ambiente</div>
+      <div class="arow"><span>Tocar música instrumental discreta enquanto você lê</span><button class="sw" id="sw" type="button" role="switch" aria-checked="false" aria-label="Música ambiente"><i></i></button></div>
+      <div class="vol"><label for="vol">Volume</label><input type="range" id="vol" min="0" max="100" value="40"></div>
+      <p id="audState" style="font-size:12px;color:var(--soft);margin-top:6px">Desligada</p></div>
+    <div class="drule"></div>
+    <button class="ditem" type="button" data-d="bless" id="blessItem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10Z"/></svg>Abençoe este Projeto<i>&#8250;</i></button>
+    <button class="ditem" type="button" data-d="contact"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>Contato e suporte<i>&#8250;</i></button>
+    <button class="ditem" type="button" data-d="about"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg>Sobre<i>&#8250;</i></button>
+  </div></div>
+  <div id="modalBg" role="dialog" aria-modal="true" hidden><div class="modal"><button class="xbtn mx" id="mClose" type="button" aria-label="Fechar">&times;</button><div id="mBody"></div></div></div>
+  <div class="toast" id="toast" role="status"></div>
+</div>
+<script src="src/books.js"></script>
+<script src="src/core.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
+<<<END>>>
+
+<<<FILE kaggle/viabilidade/kernel-metadata.json>>>
+{
+  "id": "andersonplvbr/pv-viabilidade",
+  "title": "pv-viabilidade",
+  "code_file": "teste.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": []
+}
+<<<END>>>
+
+<<<FILE kaggle/viabilidade/teste.py>>>
+import subprocess, json, urllib.request, urllib.error
+
+res = {}
+
+def sh(c):
+    try:
+        r = subprocess.run(c, shell=True, capture_output=True, text=True, timeout=180)
+        return (r.stdout + r.stderr).strip()[:500]
+    except Exception as e:
+        return "ERR " + type(e).__name__
+
+def code(url):
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url), timeout=30) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+    except Exception as e:
+        return "ERR " + type(e).__name__ + ": " + str(e)[:80]
+
+res["gpu"] = sh("nvidia-smi --query-gpu=name,memory.total --format=csv,noheader")
+res["python"] = sh("python --version")
+res["disco"] = sh("df -h /kaggle/working | tail -1")
+res["internet_huggingface"] = code("https://huggingface.co")
+res["internet_github"] = code("https://github.com")
+res["pip_download"] = sh("pip download --no-deps -d /tmp/x tqdm | tail -1")
+
+# 200 = baixa sem conta/licença. 401/403 = exige aceitar licença/token.
+modelos = [
+  "Qwen/Qwen2.5-7B-Instruct",
+  "google/gemma-2-9b-it",
+  "meta-llama/Llama-3.1-8B-Instruct",
+  "microsoft/Phi-3.5-mini-instruct",
+  "ibm-granite/granite-3.1-8b-instruct",
+  "mistralai/Mistral-7B-Instruct-v0.3",
+  "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+  "01-ai/Yi-1.5-9B-Chat",
+]
+res["modelos_config_json"] = {m: code("https://huggingface.co/%s/resolve/main/config.json" % m) for m in modelos}
+
+open("/kaggle/working/resultado.json", "w").write(json.dumps(res, indent=2, ensure_ascii=False))
+print(json.dumps(res, indent=2, ensure_ascii=False))
+<<<END>>>
+
+<<<FILE manifest.json>>>
+{
+  "id": "./",
+  "name": "Palavra Viva",
+  "short_name": "Palavra Viva",
+  "description": "Bíblia em português, gratuita e sem internet, com ensino em camadas.",
+  "lang": "pt-BR",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F7EEDC",
+  "theme_color": "#1F4D43",
+  "categories": ["books", "education", "lifestyle"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
+<<<END>>>
+
+<<<FILE reset.html>>>
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Limpar cache — Palavra Viva</title><link rel="stylesheet" href="styles.css"></head>
+<body><main>
+<h1>Limpar cache do app</h1>
+<p>Isso apaga os arquivos guardados para uso sem internet e recarrega o app. Suas notas e destaques <strong>não</strong> são apagados, a menos que você marque a opção abaixo.</p>
+<p><label><input type="checkbox" id="also-data"> Apagar também minhas notas, destaques e onde parei</label></p>
+<p><button class="tap primary" id="go" type="button">Limpar cache</button> <a class="tap" href="./">Voltar</a></p>
+<p id="msg" role="status"></p>
+</main>
+<script>
+document.getElementById('go').addEventListener('click', async function () {
+  var msg = document.getElementById('msg');
+  try {
+    var regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.map(function (r) { return r.unregister(); }));
+    var names = await caches.keys();
+    await Promise.all(names.filter(function (n) { return n.indexOf('pv4-') === 0; }).map(function (n) { return caches.delete(n); }));
+    if (document.getElementById('also-data').checked) { await new Promise(function (res) { var q = indexedDB.deleteDatabase('pv4-reader'); q.onsuccess = q.onerror = q.onblocked = res; }); }
+    msg.textContent = 'Pronto. Abrindo o app…';
+    setTimeout(function () { location.href = './'; }, 800);
+  } catch (e) { msg.textContent = 'Não foi possível limpar: ' + e.message; }
+});
+</script></body></html>
+<<<END>>>
+
+<<<FILE schemas/chapter.schema.json>>>
+{"type":"object","required":["book","chapter","verses"],"properties":{"_teste":{"type":"boolean"},"book":{"type":"string","minLength":1},"chapter":{"type":"integer","minimum":1},"verses":{"type":"array","minItems":1,"items":{"type":"object","required":["n","t"],"properties":{"n":{"type":"integer","minimum":1},"t":{"type":"string","minLength":1}}}}}}
+<<<END>>>
+
+<<<FILE schemas/manifest.schema.json>>>
+{"type":"object","required":["generation","contentVersion","production","license","bible","packages","revoked"],"properties":{"generation":{"type":"integer","minimum":1},"contentVersion":{"type":"string"},"production":{"type":"boolean"},"license":{"type":"object","required":["text"]},"bible":{"type":"array","items":{"type":"object","required":["id","name","chapters"]}},"packages":{"type":"array","items":{"type":"object","required":["path","sha256","size","precache"],"properties":{"path":{"type":"string"},"sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"},"size":{"type":"integer"},"precache":{"type":"boolean"}}}},"revoked":{"type":"array","items":{"type":"string"}}}}
+<<<END>>>
+
+<<<FILE schemas/passage.schema.json>>>
+{"type":"object","required":["id","ref","book","chapter","verses"],"properties":{"_teste":{"type":"boolean"},"id":{"type":"string","minLength":1},"ref":{"type":"string","minLength":1},"book":{"type":"string"},"chapter":{"type":"integer","minimum":1},"verses":{"type":"array","minItems":1},"entender":{"type":"string"},"ligar":{"type":"object","required":["texto"],"properties":{"texto":{"type":"string"},"selo":{"type":"boolean"}}},"refs":{"type":"array","items":{"type":"string"}},"audit":{"type":"object","required":["generator","auditors","gates","humanReviewed","contractVersion"],"properties":{"generator":{"type":"object","required":["model","family"]},"auditors":{"type":"array","minItems":2,"items":{"type":"object","required":["model","family"]}},"gates":{"type":"object"},"humanReviewed":{"type":"boolean"},"contractVersion":{"type":"string"}}},"pergunta":{"type":"string"}}}
+<<<END>>>
+
+<<<FILE scripts/build-manifest.mjs>>>
+/* Lê content-src/, grava content/<nome>.<hash12>.json e escreve content-manifest.json com geração+1. */
+import { readFileSync, writeFileSync, readdirSync, mkdirSync, existsSync, rmSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { join, dirname, basename, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root = process.argv[2] ? resolve(process.argv[2]) : join(dirname(fileURLToPath(import.meta.url)), '..');
+const src = join(root, 'content-src'), out = join(root, 'content');
+const walk = d => readdirSync(d).flatMap(f => { const p = join(d, f); return statSync(p).isDirectory() ? walk(p) : p.endsWith('.json') && basename(p) !== 'meta.json' ? [p] : []; }).sort();
+const meta = JSON.parse(readFileSync(join(src, 'meta.json'), 'utf8'));
+const mpath = join(root, 'content-manifest.json');
+const prev = existsSync(mpath) ? JSON.parse(readFileSync(mpath, 'utf8')) : null;
+mkdirSync(out, { recursive: true });
+const packages = [], books = new Map(meta.books.map(b => [b.id, { id: b.id, name: b.name, chapters: [] }]));
+const passages = [];
+for (const f of walk(src)) {
+  const bytes = readFileSync(f);
+  const hash = createHash('sha256').update(bytes).digest('hex');
+  const name = basename(f, '.json') + '.' + hash.slice(0, 12) + '.json';
+  writeFileSync(join(out, name), bytes);
+  const data = JSON.parse(bytes.toString('utf8'));
+  const isChapter = f.includes(join(src, 'biblia'));
+  const path = 'content/' + name;
+  packages.push({ path, sha256: hash, size: bytes.length, precache: isChapter, kind: isChapter ? 'biblia' : 'camada2', ...(data._teste ? { teste: true } : {}) });
+  if (isChapter) books.get(data.book).chapters.push({ n: data.chapter, path });
+  else passages.push({ id: data.id, ref: data.ref, book: data.book, chapter: data.chapter, path });
+}
+books.forEach(b => b.chapters.sort((a, c) => a.n - c.n));
+const keep = new Set(packages.map(p => basename(p.path)));
+const history = [...(prev?.history || []), ...(prev ? [{ generation: prev.generation, contentVersion: prev.contentVersion, packages: prev.packages.map(p => p.path) }] : [])].slice(-3);
+for (const h of history) h.packages.forEach(p => keep.add(basename(p)));
+for (const f of readdirSync(out)) if (!keep.has(f)) rmSync(join(out, f));
+const manifest = { generation: Math.max((prev?.generation || 0) + 1, meta.minGeneration || 1), contentVersion: meta.contentVersion, production: meta.production, license: meta.license, bible: [...books.values()], passages, packages, revoked: prev?.revoked || [], history };
+writeFileSync(mpath, JSON.stringify(manifest, null, 2) + '\n');
+console.log('manifesto geração', manifest.generation, '-', packages.length, 'pacotes');
+<<<END>>>
+
+<<<FILE scripts/mini-schema.mjs>>>
+/* Mini-validador de JSON Schema (subconjunto usado em schemas/). Sem dependências. */
+export function check(schema, value, path = '$') {
+  const errs = [];
+  const t = schema.type;
+  const typeOk = { object: v => v && typeof v === 'object' && !Array.isArray(v), array: Array.isArray, string: v => typeof v === 'string', integer: Number.isInteger, boolean: v => typeof v === 'boolean' };
+  if (t && !typeOk[t](value)) return [`${path}: tipo esperado ${t}`];
+  if (t === 'string') {
+    if (schema.minLength && value.length < schema.minLength) errs.push(`${path}: texto curto demais`);
+    if (schema.pattern && !new RegExp(schema.pattern).test(value)) errs.push(`${path}: formato inválido`);
+  }
+  if (t === 'integer' && schema.minimum !== undefined && value < schema.minimum) errs.push(`${path}: menor que ${schema.minimum}`);
+  if (t === 'array') {
+    if (schema.minItems && value.length < schema.minItems) errs.push(`${path}: itens insuficientes`);
+    if (schema.items) value.forEach((x, i) => errs.push(...check(schema.items, x, `${path}[${i}]`)));
+  }
+  if (t === 'object') {
+    for (const k of schema.required || []) if (!(k in value)) errs.push(`${path}.${k}: obrigatório`);
+    for (const [k, s] of Object.entries(schema.properties || {})) if (k in value) errs.push(...check(s, value[k], `${path}.${k}`));
+  }
+  return errs;
+}
+<<<END>>>
+
+<<<FILE scripts/validate-content.mjs>>>
+/* Valida content-manifest.json e content/ . Sai com código 1 se algo estiver errado. */
+import { readFileSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { join, dirname, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { check } from './mini-schema.mjs';
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const J = p => JSON.parse(readFileSync(join(root, p), 'utf8'));
+export function validate(rootDir = root) {
+  const R = p => JSON.parse(readFileSync(join(rootDir, p), 'utf8'));
+  const errs = [];
+  const m = R('content-manifest.json');
+  errs.push(...check(J('schemas/manifest.schema.json'), m, 'manifesto'));
+  if (errs.length) return errs;
+  const seen = new Set();
+  for (const p of m.packages) {
+    if (seen.has(p.path)) errs.push('caminho duplicado: ' + p.path); seen.add(p.path);
+    const f = join(rootDir, p.path);
+    if (!existsSync(f)) { errs.push('arquivo ausente: ' + p.path); continue; }
+    const bytes = readFileSync(f);
+    const h = createHash('sha256').update(bytes).digest('hex');
+    if (h !== p.sha256) errs.push('hash diferente do manifesto: ' + p.path);
+    if (!basename(p.path).includes('.' + h.slice(0, 12) + '.')) errs.push('hash no nome não confere: ' + p.path);
+    if (bytes.length !== p.size) errs.push('tamanho diferente: ' + p.path);
+    let d; try { d = JSON.parse(bytes.toString('utf8')); } catch { errs.push('JSON inválido: ' + p.path); continue; }
+    const isTest = d._teste === true;
+    if (isTest !== (p.teste === true)) errs.push('marca de teste incoerente: ' + p.path);
+    if (isTest && m.production) errs.push('produção com conteúdo de teste: ' + p.path);
+    if (p.kind === 'biblia') errs.push(...check(J('schemas/chapter.schema.json'), d, p.path));
+    else {
+      errs.push(...check(J('schemas/passage.schema.json'), d, p.path));
+      if (!isTest) {
+        const a = d.audit;
+        if (!a) errs.push('passagem real sem auditoria: ' + p.path);
+        else {
+          const fams = a.auditors.map(x => x.family);
+          if (new Set(fams).size < 2 || fams.includes(a.generator.family)) errs.push('auditores sem famílias diferentes entre si e do gerador: ' + p.path);
+          const gates = Object.values(a.gates || {});
+          if (gates.length !== 36 || gates.some(g => g !== 'P')) errs.push('os 36 critérios precisam estar todos P: ' + p.path);
+        }
+      }
+    }
+  }
+  for (const b of m.bible) for (const c of b.chapters) if (!seen.has(c.path)) errs.push('capítulo sem pacote: ' + c.path);
+  const ids = new Set();
+  for (const ps of m.passages || []) { if (ids.has(ps.id)) errs.push('id repetido: ' + ps.id); ids.add(ps.id); if (!seen.has(ps.path)) errs.push('passagem sem pacote: ' + ps.id); }
+  return errs;
+}
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const e = validate();
+  if (e.length) { console.error(e.join('\n')); process.exit(1); }
+  console.log('conteúdo válido');
+}
+<<<END>>>
+
+<<<FILE src/books.js>>>
+/* Cânon bíblico fixo (66 livros): nomes, siglas, testamento e número de capítulos.
+   O conteúdo (texto) vem dos pacotes; aqui só a estrutura, que não muda. */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.PVBooks = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+  /* [nome, sigla, capítulos] — AT = 39 primeiros, NT = 27 últimos */
+  var RAW = [
+    ['Gênesis', 'Gn', 50], ['Êxodo', 'Êx', 40], ['Levítico', 'Lv', 27], ['Números', 'Nm', 36], ['Deuteronômio', 'Dt', 34],
+    ['Josué', 'Js', 24], ['Juízes', 'Jz', 21], ['Rute', 'Rt', 4], ['1 Samuel', '1Sm', 31], ['2 Samuel', '2Sm', 24],
+    ['1 Reis', '1Rs', 22], ['2 Reis', '2Rs', 25], ['1 Crônicas', '1Cr', 29], ['2 Crônicas', '2Cr', 36], ['Esdras', 'Ed', 10],
+    ['Neemias', 'Ne', 13], ['Ester', 'Et', 10], ['Jó', 'Jó', 42], ['Salmos', 'Sl', 150], ['Provérbios', 'Pv', 31],
+    ['Eclesiastes', 'Ec', 12], ['Cantares', 'Ct', 8], ['Isaías', 'Is', 66], ['Jeremias', 'Jr', 52], ['Lamentações', 'Lm', 5],
+    ['Ezequiel', 'Ez', 48], ['Daniel', 'Dn', 12], ['Oseias', 'Os', 14], ['Joel', 'Jl', 3], ['Amós', 'Am', 9],
+    ['Obadias', 'Ob', 1], ['Jonas', 'Jn', 4], ['Miqueias', 'Mq', 7], ['Naum', 'Na', 3], ['Habacuque', 'Hc', 3],
+    ['Sofonias', 'Sf', 3], ['Ageu', 'Ag', 2], ['Zacarias', 'Zc', 14], ['Malaquias', 'Ml', 4],
+    ['Mateus', 'Mt', 28], ['Marcos', 'Mc', 16], ['Lucas', 'Lc', 24], ['João', 'Jo', 21], ['Atos', 'At', 28],
+    ['Romanos', 'Rm', 16], ['1 Coríntios', '1Co', 16], ['2 Coríntios', '2Co', 13], ['Gálatas', 'Gl', 6], ['Efésios', 'Ef', 6],
+    ['Filipenses', 'Fp', 4], ['Colossenses', 'Cl', 4], ['1 Tessalonicenses', '1Ts', 5], ['2 Tessalonicenses', '2Ts', 3],
+    ['1 Timóteo', '1Tm', 6], ['2 Timóteo', '2Tm', 4], ['Tito', 'Tt', 3], ['Filemom', 'Fm', 1], ['Hebreus', 'Hb', 13],
+    ['Tiago', 'Tg', 5], ['1 Pedro', '1Pe', 5], ['2 Pedro', '2Pe', 3], ['1 João', '1Jo', 5], ['2 João', '2Jo', 1],
+    ['3 João', '3Jo', 1], ['Judas', 'Jd', 1], ['Apocalipse', 'Ap', 22]
+  ];
+  var LIST = RAW.map(function (r, i) {
+    return { id: String(i + 1), name: r[0], abbr: r[1], chapters: r[2], testament: i < 39 ? 'at' : 'nt' };
+  });
+  var BY_ID = {};
+  LIST.forEach(function (b) { BY_ID[b.id] = b; });
+
+  function all() { return LIST.slice(); }
+  function byId(id) { return BY_ID[String(id)] || null; }
+
+  return { all: all, byId: byId };
+});
+<<<END>>>
+
+<<<FILE src/core.js>>>
+/* Núcleo do Palavra Viva: lógica pura, usada pelo app, pelo service worker e pelos testes.
+   Sem rede, sem dependências. Regras da seção 5 do plano. */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.PVCore = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+  const PREFIX = 'pv4-';
+
+  async function sha256Hex(bytes) {
+    const buf = await crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+  }
+
+  /* Confere um pacote baixado contra a entrada do manifesto. Falha fechada. */
+  async function verifyPackage(bytes, entry) {
+    if (!entry || typeof entry.sha256 !== 'string') return { ok: false, reason: 'entrada_invalida' };
+    const h = await sha256Hex(bytes);
+    if (h !== entry.sha256) return { ok: false, reason: 'hash_diferente' };
+    if (typeof entry.size === 'number' && bytes.byteLength !== entry.size) return { ok: false, reason: 'tamanho_diferente' };
+    return { ok: true };
+  }
+
+  /* Decide se um manifesto novo é aceito e o que remover do cache.
+     Aceita só geração MAIOR (rollback também incrementa a geração).
+     Remove do cache o que não consta no manifesto novo e o que foi revogado. */
+  function planUpdate(current, incoming, cachedPaths) {
+    if (!incoming || !Number.isInteger(incoming.generation) || !Array.isArray(incoming.packages)) {
+      return { accept: false, reason: 'manifesto_invalido', remove: [] };
+    }
+    if (current && Number.isInteger(current.generation)) {
+      if (incoming.generation < current.generation) return { accept: false, reason: 'geracao_menor', remove: [] };
+      if (incoming.generation === current.generation) return { accept: false, reason: 'mesma_geracao', remove: [] };
+    }
+    const keep = new Set(incoming.packages.map(function (p) { return p.path; }));
+    const revoked = new Set(incoming.revoked || []);
+    const shaByPath = new Map();
+    ((current && current.packages) || []).forEach(function (p) { shaByPath.set(p.path, p.sha256); });
+    incoming.packages.forEach(function (p) { shaByPath.set(p.path, p.sha256); });
+    const remove = (cachedPaths || []).filter(function (p) {
+      return !keep.has(p) || revoked.has(shaByPath.get(p));
+    });
+    return { accept: true, reason: 'ok', remove: remove };
+  }
+
+  /* Nomes de cache a apagar: só os do app (prefixo pv4-) que não estão na lista de mantidos. */
+  function cleanupPlan(cacheNames, keep) {
+    const k = new Set(keep || []);
+    return (cacheNames || []).filter(function (n) { return n.indexOf(PREFIX) === 0 && !k.has(n); });
+  }
+
+  /* Abas visíveis de uma passagem: aba sem conteúdo nunca aparece; nunca "em breve". */
+  function visibleTabs(passage) {
+    const tabs = [];
+    if (!passage) return tabs;
+    const has = function (v) { return typeof v === 'string' && v.trim().length > 0; };
+    if (Array.isArray(passage.verses) && passage.verses.length) tabs.push('ler');
+    if (has(passage.entender)) tabs.push('entender');
+    if (passage.ligar && has(passage.ligar.texto)) tabs.push('ligar');
+    if (Array.isArray(passage.refs) && passage.refs.length) tabs.push('aprofundar');
+    return tabs;
+  }
+
+
+  /* Texto sem acento e em minúsculas, para busca. */
+  function normalize(s) {
+    return String(s == null ? '' : s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  }
+
+  /* Acha a consulta no texto ignorando acento e caixa. Devolve {start,end} nos índices do texto ORIGINAL, ou null. */
+  function findMatch(text, query) {
+    const q = normalize(query).trim();
+    if (!q) return null;
+    let nt = '';
+    const map = [];
+    const src = String(text == null ? '' : text);
+    for (let i = 0; i < src.length; i++) {
+      const n = normalize(src[i]);
+      for (let k = 0; k < n.length; k++) { nt += n[k]; map.push(i); }
+    }
+    const idx = nt.indexOf(q);
+    if (idx < 0) return null;
+    return { start: map[idx], end: map[idx + q.length - 1] + 1 };
+  }
+
+  /* Separa "Livro de Teste 1:2" ou "João 3:16" em {name, chapter, verse}. */
+  function parseRef(ref) {
+    const m = /^\s*(.+?)\s+(\d+)(?::(\d+))?(?:\s*[-–]\s*\d+)?\s*$/.exec(String(ref || ''));
+    if (!m) return null;
+    return { name: m[1], chapter: parseInt(m[2], 10), verse: m[3] ? parseInt(m[3], 10) : null };
+  }
+
+  /* Selo de autoria do ensino. Texto fixo exigido pelo plano; "Revisado por pessoa" só se humanReviewed === true. */
+  function stampText(passage) {
+    if (!passage) return '';
+    if (passage._teste === true) return 'Exemplo de teste: este texto é fictício.';
+    let t = 'Ensino do app, não é a Bíblia. Gerado por IA e conferido por outras IAs.';
+    if (passage.audit && passage.audit.humanReviewed === true) t += ' Revisado por pessoa.';
+    return t;
+  }
+
+  /* Cronograma de download: lista de pacotes que faltam no cache. */
+  function missingPackages(manifest, cachedPaths) {
+    const have = new Set(cachedPaths || []);
+    return ((manifest && manifest.packages) || []).filter(function (p) { return !have.has(p.path); });
+  }
+
+  return { normalize: normalize, findMatch: findMatch, parseRef: parseRef, stampText: stampText, missingPackages: missingPackages, PREFIX: PREFIX, sha256Hex: sha256Hex, verifyPackage: verifyPackage, planUpdate: planUpdate, cleanupPlan: cleanupPlan, visibleTabs: visibleTabs };
+});
+<<<END>>>
+
+<<<FILE styles.css>>>
+
+/* Identidade do Palavra Viva Robusto: pergaminho, topo verde-floresta, dourado, serifa, fotos escuras com texto claro.
+   Layout: vitrine de fotos no topo, cartões de fotos em carrossel, faixa "Continuar leitura", Bíblia em grade, menu lateral. */
+:root{
+  --paper:#F7EEDC; --card:#FCF8EE; --card-2:#E3EADC; --tile-at:#E9DEC1;
+  --text:#1D2A26; --soft:#7A745F; --ink:#1F4D43; --gold:#E3B96F; --gold-ink:#2A2118; --gold-soft:#F1E2B9; --icon-bg:#EFE3C2;
+  --line:#E6DBC1; --gospel:#8E3B2E; --gospel-soft:#F4E3D6; --accent:#1F4D43; --tagink:#7A5510; --sup:#9A6A1F;
+  --shadow:0 4px 14px rgba(77,57,34,.08);
+  --serif:"Noto Serif","Source Serif 4",Georgia,serif; --ui:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; --fs:1.125rem;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#12191A; --card:#1B2726; --card-2:#22302B; --tile-at:#2B2A22; --text:#EDE5D3; --soft:#9FA79A; --ink:#1D3B33;
+  --gold:#D9A94F; --gold-soft:#3B3528; --icon-bg:#26302A; --line:#2C3A36; --gospel:#E39A8A; --gospel-soft:#3A2824;
+  --accent:#E3B96F; --tagink:#E3B96F; --sup:#E3B96F; --shadow:0 4px 16px rgba(0,0,0,.25); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --paper:#12191A; --card:#1B2726; --card-2:#22302B; --tile-at:#2B2A22; --text:#EDE5D3; --soft:#9FA79A; --ink:#1D3B33;
+  --gold:#D9A94F; --gold-soft:#3B3528; --icon-bg:#26302A; --line:#2C3A36; --gospel:#E39A8A; --gospel-soft:#3A2824;
+  --accent:#E3B96F; --tagink:#E3B96F; --sup:#E3B96F; --shadow:0 4px 16px rgba(0,0,0,.25); color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--text);font-family:var(--ui);line-height:1.45;-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+h1,h2,h3,p{margin:0}
+html,body{height:100%}
+#app{width:min(100%,480px);height:100vh;height:100dvh;margin:0 auto;position:relative;background:var(--paper);overflow:hidden}
+@media (min-width:520px){#app{border-left:1px solid var(--line);border-right:1px solid var(--line)}}
+.screen{position:absolute;inset:0;overflow-y:auto;padding-bottom:96px;display:none}
+.screen.on{display:block}
+/* abertura */
+#splash{position:absolute;inset:0;z-index:50;background:radial-gradient(120% 90% at 50% 40%,#17483e 0%,#0e2f28 70%);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#F1E2B9;transition:opacity .5s,visibility .5s;cursor:pointer}
+#splash.off{opacity:0;visibility:hidden}
+#splash .tile{width:84px;height:84px;border-radius:22px;background:#1b4a40;border:1px solid rgba(227,185,111,.35);display:grid;place-items:center;box-shadow:0 10px 30px rgba(0,0,0,.3);margin-bottom:14px}
+#splash .tile svg{width:52px;height:52px}
+#splash b{letter-spacing:.2em;font-size:12px;font-weight:700}
+#splash .n{font:600 20px var(--serif);letter-spacing:.12em;text-transform:uppercase;color:#FCF8EE}
+#splash small{letter-spacing:.22em;font-size:11px;color:#E3B96F}
+#splash .ln{width:92px;height:2px;margin-top:18px;background:linear-gradient(90deg,transparent,#E3B96F,transparent);animation:ln 2.4s ease-in-out 3}
+@keyframes ln{50%{opacity:.35}}
+/* vitrine */
+.hero{position:relative}
+.slides{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none}
+.slides::-webkit-scrollbar{display:none}
+.slide{flex:0 0 100%;scroll-snap-align:start;min-height:300px;padding:0 20px 26px;display:flex;flex-direction:column;justify-content:flex-end;color:#fff;text-align:left;
+  background:linear-gradient(180deg,rgba(10,18,17,.35) 0%,rgba(10,18,17,.15) 35%,rgba(10,18,17,.82) 100%),var(--img) center/cover,#1d3b33;border-radius:0 0 30px 30px}
+.slide .eb{font-size:10.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;opacity:.92;margin-bottom:6px}
+.slide h1{font:700 27px/1.15 var(--serif);max-width:15em;text-wrap:balance;margin-bottom:6px}
+.slide p{font-size:13.5px;opacity:.88;max-width:28em;margin-bottom:14px}
+.cta{align-self:flex-start;display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 20px;border-radius:22px;background:var(--gold);color:var(--gold-ink);font-weight:700;font-size:14px}
+.menubtn{position:absolute;left:16px;top:16px;z-index:3;width:44px;height:44px;border-radius:14px;background:rgba(10,18,17,.55);backdrop-filter:blur(6px);color:#fff;display:grid;place-items:center;border:1px solid rgba(255,255,255,.18)}
+.menubtn svg{width:20px;height:20px}
+.ctrl{display:flex;justify-content:center;align-items:center;gap:12px;padding:12px 0 6px}
+.ctrl button{width:36px;height:36px;color:var(--soft);display:grid;place-items:center}
+.ctrl button svg{width:18px;height:18px}
+.dots{display:flex;gap:6px;align-items:center}
+.dots i{width:7px;height:7px;border-radius:50%;background:var(--line);transition:all .2s}
+.dots i.on{width:22px;border-radius:4px;background:var(--gold)}
+.testbar{margin:6px 20px 4px;padding:9px 14px;border-radius:14px;background:var(--gold-soft);font-size:12.5px;line-height:1.35}
+.sec{padding:14px 20px 0}
+.eyebrow{font-size:10.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--soft)}
+.sechead{display:flex;justify-content:space-between;align-items:baseline;margin:4px 0 12px}
+.sechead h2{font:700 20px var(--serif)}
+.sechead span{font-size:12px;color:var(--soft)}
+.rail{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;margin:0 -20px;padding:0 20px}
+.rail::-webkit-scrollbar{display:none}
+.pcard{flex:0 0 78%;scroll-snap-align:start;height:150px;border-radius:22px;padding:14px 16px;color:#fff;text-align:left;display:flex;flex-direction:column;justify-content:flex-end;position:relative;
+  background:linear-gradient(180deg,rgba(10,18,17,.05) 25%,rgba(10,18,17,.8) 100%),var(--img) center/cover,#23382f;box-shadow:var(--shadow)}
+.pcard .eb{font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
+.pcard strong{font:600 18px/1.15 var(--serif);margin:2px 0}
+.pcard small{font-size:12px;opacity:.85}
+.pcard .st{position:absolute;right:12px;top:12px;width:30px;height:30px;border-radius:50%;background:rgba(0,0,0,.35);display:grid;place-items:center;color:var(--gold)}
+.pcard .st svg{width:16px;height:16px}
+.resume{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--card);border-radius:20px;padding:12px 14px 12px 16px;margin:16px 20px 0;box-shadow:var(--shadow);text-align:left;width:calc(100% - 40px)}
+.resume .t{display:flex;flex-direction:column}
+.resume strong{font:700 18px var(--serif)}
+.ler{min-width:56px;min-height:40px;border-radius:14px;background:var(--gold);color:var(--gold-ink);font-weight:700;display:grid;place-items:center;padding:0 16px}
+.bible{padding:22px 20px 0}
+.bible h2{font:700 24px var(--serif);margin:2px 0 12px}
+.vers{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--card);border-radius:18px;padding:10px 14px;box-shadow:var(--shadow);margin-bottom:12px}
+.vers label{font-size:10.5px;font-weight:800;letter-spacing:.12em;color:var(--soft);text-transform:uppercase}
+.vers select{flex:1;max-width:60%;min-height:42px;border-radius:12px;border:1px solid var(--line);background:var(--paper);font:inherit;font-weight:600;color:var(--text);padding:0 10px}
+.tt{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.tt button{min-height:46px;border-radius:14px;background:var(--card);font-weight:700;box-shadow:var(--shadow)}
+.tt button[aria-pressed="true"]{background:var(--ink);color:#F1E2B9}
+.bgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.bk{min-height:72px;border-radius:16px;background:var(--card);box-shadow:var(--shadow);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+.bk b{font:700 17px var(--serif)}
+.bk span{font-size:12px;color:var(--soft)}
+.bk.off{opacity:.5}
+.search{display:flex;align-items:center;gap:10px;min-height:50px;padding:0 16px;border-radius:25px;background:var(--card);box-shadow:var(--shadow);margin-bottom:12px;width:100%;text-align:left;color:var(--soft)}
+.search svg{width:20px;height:20px;flex:none}
+.search input{flex:1;min-width:0;border:0;background:none;font:inherit;color:var(--text);height:46px}
+/* barras internas */
+.topbar{position:sticky;top:0;z-index:10;background:var(--ink);color:#FCF8EE;padding:12px 16px;display:flex;align-items:center;gap:12px;box-shadow:var(--shadow)}
+.back{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 14px 0 10px;border-radius:12px;background:var(--card);color:var(--accent);font-weight:700;font-size:14px;border:1px solid var(--gold)}
+.back svg{width:16px;height:16px}
+.topbar h2{font:600 19px var(--serif);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pad{padding:18px 20px;display:flex;flex-direction:column;gap:18px}
+.tag{align-self:flex-start;font-size:12px;font-weight:700;padding:4px 12px;border-radius:12px;background:var(--gold-soft);color:var(--tagink)}
+.tag.app{background:var(--card-2);color:var(--text)}
+.text{font-family:var(--serif);font-size:var(--fs);line-height:1.8;display:flex;flex-direction:column;gap:2px;max-width:62ch}
+.v{display:block;text-align:left;padding:6px 10px;margin:0 -10px;border-radius:10px;width:calc(100% + 20px)}
+.v sup{font-family:var(--ui);font-size:.66em;font-weight:700;color:var(--sup);margin-right:6px}
+.v[aria-pressed="true"]{background:var(--gold-soft);box-shadow:inset 3px 0 0 var(--gold)}
+.chapgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;padding:16px}
+.chapgrid button{aspect-ratio:1;border-radius:14px;background:var(--card);font:700 16px var(--serif);box-shadow:var(--shadow)}
+.row2{display:flex;gap:10px}
+.row2 button{flex:1;min-height:48px;border-radius:14px;background:var(--card);font-weight:600;box-shadow:var(--shadow)}
+.entender{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:96px;border-radius:22px;padding:16px;text-align:left;background:linear-gradient(135deg,rgba(14,47,40,.92),rgba(14,47,40,.6)),var(--img) center/cover,#1d3b33;color:#fff}
+.entender .eb{font-size:10.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;opacity:.9}
+.entender strong{display:block;font:700 22px var(--serif)}
+.depth{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;position:sticky;top:64px;z-index:5;background:var(--paper);padding:10px 0}
+.depth::-webkit-scrollbar{display:none}
+.dtab{flex:none;min-height:42px;padding:0 16px;border-radius:21px;font-weight:600;font-size:14px;color:var(--soft);background:var(--card)}
+.dtab[aria-selected="true"]{background:var(--ink);color:#F1E2B9}
+.panel{display:none;flex-direction:column;gap:16px}
+.panel.on{display:flex}
+.cardx{background:var(--card);border-radius:22px;padding:16px;box-shadow:var(--shadow)}
+.study h3{font:600 15px var(--serif);color:var(--soft);margin-bottom:6px}
+.study p{font-family:var(--serif);font-size:1.06rem;line-height:1.7}
+.seal{border-radius:22px;padding:16px;background:var(--gospel-soft);display:flex;flex-direction:column;gap:6px}
+.seal b{color:var(--gospel);font-size:14px;display:flex;gap:8px;align-items:center}
+.seal p{font-family:var(--serif);font-size:1.06rem;line-height:1.65}
+.stamp{display:flex;gap:10px;font-size:12.5px;color:var(--soft)}
+.stamp svg{width:18px;height:18px;flex:none;color:var(--accent)}
+.refs{display:flex;flex-wrap:wrap;gap:8px}
+.ref{min-height:44px;padding:0 16px;border-radius:14px;background:var(--paper);font-weight:600;color:var(--accent)}
+.list{display:flex;flex-direction:column;gap:8px}
+.item{display:flex;align-items:center;justify-content:space-between;min-height:56px;padding:0 16px;border-radius:16px;background:var(--card);text-align:left;width:100%;box-shadow:var(--shadow)}
+.item strong{font:600 17px var(--serif)}
+.item small{color:var(--soft)}
+.empty{color:var(--soft);padding:10px 4px}
+.set{display:flex;flex-direction:column;gap:10px;padding:18px 20px}
+.srow{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:58px;padding:0 16px;border-radius:18px;background:var(--card);width:100%;text-align:left;box-shadow:var(--shadow)}
+.seg{display:flex;gap:6px}
+.seg button{min-width:44px;min-height:38px;padding:0 12px;border-radius:12px;background:var(--paper);font-weight:700}
+.seg button[aria-pressed="true"]{background:var(--ink);color:#F1E2B9}
+.btnrow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.btnrow .b1{min-height:50px;border-radius:14px;background:var(--gold);color:var(--gold-ink);font-weight:800}
+.btnrow .b2{min-height:50px;border-radius:14px;background:var(--ink);color:#FCF8EE;font-weight:800}
+/* barra inferior */
+.nav{position:absolute;left:0;right:0;bottom:0;display:grid;grid-template-columns:1fr 1fr;background:var(--card);border-top:1px solid var(--line);padding:6px 0 calc(6px + env(safe-area-inset-bottom,0px));z-index:20}
+.nav button{display:flex;flex-direction:column;align-items:center;gap:2px;min-height:52px;justify-content:center;color:var(--soft);font-size:12px;font-weight:600}
+.nav button svg{width:22px;height:22px}
+.nav button[aria-current="page"]{color:var(--accent);font-weight:800}
+/* menu lateral */
+#drawerBg{position:absolute;inset:0;z-index:40;background:rgba(9,15,30,.45);opacity:0;visibility:hidden;transition:opacity .22s}
+#drawerBg.on{opacity:1;visibility:visible}
+#drawer{position:absolute;left:0;top:0;bottom:0;width:min(88%,380px);background:var(--paper);padding:20px 18px;overflow-y:auto;transform:translateX(-102%);transition:transform .25s}
+#drawerBg.on #drawer{transform:none}
+.dh{display:flex;justify-content:space-between;align-items:flex-start}
+.dh b{font:700 26px var(--serif)}
+.dh small{display:block;font-size:11px;letter-spacing:.14em;color:var(--soft);margin-top:2px}
+.xbtn{width:44px;height:44px;font-size:28px;color:var(--soft);display:grid;place-items:center}
+.drule{height:1px;background:var(--line);margin:14px 0 8px}
+.ditem{display:flex;align-items:center;gap:14px;width:100%;min-height:50px;padding:6px 6px;border-radius:12px;text-align:left;font-size:15px}
+.ditem svg{width:20px;height:20px;color:var(--soft);flex:none}
+.ditem i{margin-left:auto;font-style:normal;color:var(--soft);font-size:22px}
+.ditem:active{background:var(--card)}
+.panelx{background:var(--card);border-radius:14px;padding:12px;margin:8px 0}
+.panelx .eyebrow{margin-bottom:8px}
+.toast{position:absolute;left:50%;bottom:84px;transform:translateX(-50%);background:var(--text);color:var(--paper);padding:10px 16px;border-radius:14px;font-weight:600;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:60;white-space:nowrap}
+.toast.on{opacity:1}
+@media (prefers-reduced-motion:reduce){#splash .ln{animation:none}*{transition:none!important;scroll-behavior:auto!important}}
+
+.arow{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;font-size:12.5px;line-height:1.4}
+.sw{flex:none;width:48px;height:28px;border-radius:14px;background:var(--line);position:relative;transition:background .2s}
+.sw i{position:absolute;left:3px;top:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.sw[aria-checked="true"]{background:var(--gold)}
+.sw[aria-checked="true"] i{transform:translateX(20px)}
+.vol{display:flex;align-items:center;gap:12px;margin-top:10px;font-size:12.5px}
+.vol input{flex:1;accent-color:var(--gold)}
+#modalBg{position:absolute;inset:0;z-index:55;background:rgba(9,15,30,.55);display:flex;align-items:center;justify-content:center;padding:18px}
+#modalBg[hidden]{display:none}
+.modal{position:relative;background:var(--card);border-radius:26px;padding:18px;width:100%;max-height:90%;overflow-y:auto;box-shadow:0 20px 50px rgba(0,0,0,.35)}
+.mx{position:absolute;left:8px;top:6px}
+.mimg{height:150px;border-radius:16px;background:var(--img) center/cover,#1d3b33;margin:34px 0 14px}
+.mtag{text-align:center;font-size:10.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--soft)}
+.modal h2{font:700 24px var(--serif);text-align:center;margin:4px 0 12px;color:var(--accent)}
+.modal p{font-size:14.5px;line-height:1.55;margin-bottom:10px}
+.modal .note{display:block;text-align:center;font-style:italic;color:var(--soft);background:var(--paper);border-radius:16px;padding:8px 12px;font-size:13px;margin:8px 0}
+.modal .big{display:flex;justify-content:center;align-items:center;gap:8px;width:100%;min-height:50px;border-radius:14px;background:var(--gold);color:var(--gold-ink);font-weight:800;margin-top:10px}
+.modal a{color:var(--accent);font-weight:700;word-break:break-all}
+.modal dl{margin:0 0 10px;display:grid;gap:8px}
+.modal dt{font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--soft)}
+.modal dd{margin:0;font-size:14.5px}
+.prog{height:8px;border-radius:4px;background:var(--line);overflow:hidden;margin:12px 0 6px}
+.prog i{display:block;height:100%;width:0;background:var(--gold);transition:width .15s}
+
+/* ---- acréscimos do app real ---- */
+.banner{position:absolute;left:12px;right:12px;top:12px;z-index:45;display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 12px 10px 16px;border-radius:18px;background:var(--ink);color:#FCF8EE;box-shadow:var(--shadow);font-size:14px}
+.banner[hidden]{display:none}
+.banner button{min-height:40px;padding:0 16px;border-radius:14px;background:var(--gold);color:var(--gold-ink);font-weight:800}
+.pergunta{border-radius:22px;padding:16px;background:var(--gold-soft);display:flex;flex-direction:column;gap:6px}
+.pergunta b{font-size:10.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--tagink)}
+.pergunta p{font:600 1.15rem/1.45 var(--serif)}
+.err{padding:18px 20px;display:flex;flex-direction:column;gap:12px}
+.err p{color:var(--soft)}
+.btn{min-height:48px;padding:0 20px;border-radius:14px;background:var(--gold);color:var(--gold-ink);font-weight:800}
+.btn.alt{background:var(--card);color:var(--text);box-shadow:var(--shadow)}
+.bk[aria-disabled="true"]{opacity:.5}
+.chapgrid button[aria-disabled="true"]{opacity:.35}
+.ref-mini{font-family:var(--ui);font-size:.8rem;font-weight:700;color:var(--soft)}
+.hit{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;padding:12px 16px;border-radius:16px;background:var(--card);box-shadow:var(--shadow)}
+.hit strong{font:700 15px var(--serif);color:var(--accent)}
+.hit span{font-family:var(--serif);font-size:.98rem;line-height:1.5}
+mark{background:var(--gold-soft);color:inherit;border-radius:4px;box-shadow:0 0 0 2px var(--gold-soft)}
+.v.flash{animation:flash 1.8s ease}
+@keyframes flash{0%,60%{background:var(--gold-soft);box-shadow:inset 3px 0 0 var(--gold)}100%{background:transparent}}
+.count{font-size:12.5px;color:var(--soft)}
+.dlstat{font-size:13px;color:var(--soft);text-align:center;margin:6px 0}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.stamp.alone{margin-top:4px}
+.mimg.has{display:block}
+#modalBg .modal .row{display:flex;gap:10px;margin-top:10px}
+#modalBg .modal .row .big{margin-top:0}
+.srow small{color:var(--soft)}
+.filein{display:none}
+.hint{font-size:12.5px;color:var(--soft);line-height:1.45;padding:0 4px}
+.empty button{margin-top:10px}
+a.srow{color:inherit;text-decoration:none}
+.rights{font-size:12px;line-height:1.4;color:var(--soft);text-align:center;padding:18px 8px 4px}
+<<<END>>>
+
+<<<FILE sw.js>>>
+/* Service worker do Palavra Viva.
+   - sem skipWaiting automático: a página pede com o botão "Atualizar";
+   - cache antigo só é apagado na ativação do novo, e só chaves com prefixo pv4-;
+   - sw.js e content-manifest.json sempre da rede (no-store); cache só como reserva offline;
+   - __SHELL_HASH__ é trocado no deploy pelo hash dos arquivos do app: só muda quando o app muda. */
+importScripts('src/core.js');
+const VERSION = '__SHELL_HASH__';
+const SHELL = 'pv4-shell-' + VERSION;
+const CONTENT = 'pv4-content';
+const MEDIA = 'pv4-media';
+const SHELL_FILES = ['./', 'index.html', 'app.js', 'styles.css', 'src/core.js', 'src/books.js', 'manifest.json', 'reset.html', 'icons/icon-192.png', 'icons/icon-512.png'];
+/* opcionais: se faltarem no servidor, a instalação NÃO falha */
+const OPTIONAL_FILES = ['config.json', 'assets/hero-bible.jpg', 'assets/hero-dawn.jpg', 'assets/hero-reading.jpg', 'assets/abencoe.jpg'];
+
+async function precacheContent() {
+  const r = await fetch('content-manifest.json', { cache: 'no-store' });
+  if (!r.ok) throw new Error('manifesto indisponível');
+  const text = await r.text();
+  const m = JSON.parse(text);
+  const c = await caches.open(CONTENT);
+  for (const e of m.packages.filter(function (p) { return p.precache; })) {
+    if (await c.match(e.path)) continue; // já guardado e verificado
+    const pr = await fetch(e.path, { cache: 'no-store' });
+    if (!pr.ok) throw new Error('pacote indisponível: ' + e.path);
+    const bytes = new Uint8Array(await pr.clone().arrayBuffer());
+    const v = await PVCore.verifyPackage(bytes, e);
+    if (!v.ok) throw new Error('hash não confere: ' + e.path); // falha fechada: instalação não conclui
+    await c.put(e.path, pr);
+  }
+  await c.put('content-manifest.json', new Response(text, { headers: { 'content-type': 'application/json' } }));
+}
+
+self.addEventListener('install', function (event) {
+  event.waitUntil((async function () {
+    const c = await caches.open(SHELL);
+    await c.addAll(SHELL_FILES.map(function (u) { return new Request(u, { cache: 'reload' }); }));
+    await Promise.all(OPTIONAL_FILES.map(async function (u) {
+      try { const r = await fetch(new Request(u, { cache: 'reload' })); if (r.ok) await c.put(u, r); } catch (e) { /* opcional */ }
+    }));
+    await precacheContent();
+  })());
+});
+
+self.addEventListener('activate', function (event) {
+  event.waitUntil((async function () {
+    const names = await caches.keys();
+    await Promise.all(PVCore.cleanupPlan(names, [SHELL, CONTENT, MEDIA]).map(function (n) { return caches.delete(n); }));
+    await self.clients.claim();
+  })());
+});
+
+self.addEventListener('message', function (event) {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
+});
+
+async function networkFirst(req, cacheName, key) {
+  try {
+    const r = await fetch(req, { cache: 'no-store' });
+    if (r.ok) { const c = await caches.open(cacheName); await c.put(key, r.clone()); }
+    return r;
+  } catch (e) {
+    const c = await caches.open(cacheName);
+    const hit = await c.match(key);
+    if (hit) return hit;
+    throw e;
+  }
+}
+
+self.addEventListener('fetch', function (event) {
+  const req = event.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+  const file = url.pathname.split('/').pop();
+  if (file === 'sw.js') return; // sempre da rede, nunca interceptado
+  if (file === 'content-manifest.json') { event.respondWith(networkFirst(req, CONTENT, 'content-manifest.json')); return; }
+  if (file === 'config.json') { event.respondWith(networkFirst(req, SHELL, 'config.json')); return; }
+  event.respondWith((async function () {
+    const hit = await caches.match(req, { ignoreSearch: true });
+    if (hit) return hit;
+    try {
+      const r = await fetch(req);
+      if (r.ok && r.status === 200 && /\/assets\//.test(url.pathname) && !req.headers.has('range')) { const c = await caches.open(SHELL); await c.put(req, r.clone()); }
+      return r;
+    } catch (e) {
+      if (req.mode === 'navigate') { const shell = await caches.open(SHELL); const idx = await shell.match('index.html'); if (idx) return idx; }
+      throw e;
+    }
+  })());
+});
+<<<END>>>
+
+<<<FILE tests/books.test.mjs>>>
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+const B = createRequire(import.meta.url)('../src/books.js');
+test('cânon: 66 livros, 39 do AT e 27 do NT, 1189 capítulos', () => {
+  const l = B.all();
+  assert.equal(l.length, 66);
+  assert.equal(l.filter(b => b.testament === 'at').length, 39);
+  assert.equal(l.filter(b => b.testament === 'nt').length, 27);
+  assert.equal(l.reduce((a, b) => a + b.chapters, 0), 1189);
+});
+test('ids numéricos únicos e livros conhecidos nos lugares certos', () => {
+  const l = B.all();
+  assert.equal(new Set(l.map(b => b.id)).size, 66);
+  assert.equal(B.byId('1').name, 'Gênesis');
+  assert.equal(B.byId('19').chapters, 150);
+  assert.equal(B.byId('43').name, 'João');
+  assert.equal(B.byId('66').name, 'Apocalipse');
+  assert.equal(B.byId('999'), null);
+});
+<<<END>>>
+
+<<<FILE tests/content.test.mjs>>>
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, cpSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { validate } from '../scripts/validate-content.mjs';
+import { check } from '../scripts/mini-schema.mjs';
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+/* cada teste monta um conteúdo de teste próprio a partir de tests/fixtures; não depende do conteúdo real do repositório */
+const copy = () => { const d = mkdtempSync(join(tmpdir(), 'pv-')); cpSync(join(root, 'tests/fixtures/content-src'), join(d, 'content-src'), { recursive: true }); const r = spawnSync('node', [join(root, 'scripts/build-manifest.mjs'), d], { encoding: 'utf8' }); if (r.status !== 0) throw new Error(r.stderr); return d; };
+const mf = d => JSON.parse(readFileSync(join(d, 'content-manifest.json'), 'utf8'));
+const save = (d, m) => writeFileSync(join(d, 'content-manifest.json'), JSON.stringify(m));
+test('conteúdo atual é válido', () => assert.deepEqual(validate(), []));
+test('arquivo adulterado é detectado', () => {
+  const d = copy(); const p = mf(d).packages[0].path;
+  writeFileSync(join(d, p), readFileSync(join(d, p), 'utf8') + ' ');
+  assert.ok(validate(d).some(e => e.includes('hash diferente')));
+});
+test('produção com conteúdo de teste é recusada', () => {
+  const d = copy(); const m = mf(d); m.production = true; save(d, m);
+  assert.ok(validate(d).some(e => e.includes('produção com conteúdo de teste')));
+});
+test('marca de teste retirada do manifesto é detectada', () => {
+  const d = copy(); const m = mf(d); delete m.packages[0].teste; save(d, m);
+  assert.ok(validate(d).some(e => e.includes('marca de teste')));
+});
+test('passagem real exige auditoria com famílias diferentes e 36 critérios', () => {
+  const d = copy(); const m = mf(d);
+  const e = m.packages.find(p => p.kind === 'camada2');
+  const gates = Object.fromEntries(Array.from({ length: 36 }, (_, i) => ['c' + (i + 1), 'P']));
+  const doc = JSON.parse(readFileSync(join(d, e.path), 'utf8')); delete doc._teste;
+  const write = x => { const b = Buffer.from(JSON.stringify(x)); const h = createHash('sha256').update(b).digest('hex'); const np = 'content/real.' + h.slice(0, 12) + '.json'; writeFileSync(join(d, np), b); e.path = np; e.sha256 = h; e.size = b.length; delete e.teste; m.passages[0].path = np; save(d, m); };
+  write(doc);
+  assert.ok(validate(d).some(x => x.includes('sem auditoria')));
+  doc.audit = { generator: { model: 'q', family: 'qwen' }, auditors: [{ model: 'g', family: 'gemma' }, { model: 'g2', family: 'gemma' }], gates, humanReviewed: false, contractVersion: '1' };
+  write(doc);
+  assert.ok(validate(d).some(x => x.includes('famílias diferentes')));
+  doc.audit.auditors[1].family = 'llama'; doc.audit.gates.c7 = 'F';
+  write(doc);
+  assert.ok(validate(d).some(x => x.includes('36 critérios')));
+  doc.audit.gates.c7 = 'P';
+  write(doc);
+  assert.deepEqual(validate(d).filter(x => !x.includes('marca')), []);
+});
+test('mini-schema recusa tipos errados', () => {
+  assert.ok(check({ type: 'object', required: ['a'] }, {}).length);
+  assert.ok(check({ type: 'integer' }, 'x').length);
+});
+<<<END>>>
+
+<<<FILE tests/core.test.mjs>>>
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+const core = createRequire(import.meta.url)('../src/core.js');
+const enc = s => new TextEncoder().encode(s);
+test('hash incorreto é rejeitado', async () => {
+  const good = await core.sha256Hex(enc('abc'));
+  assert.equal((await core.verifyPackage(enc('abc'), { sha256: good, size: 3 })).ok, true);
+  assert.equal((await core.verifyPackage(enc('abd'), { sha256: good, size: 3 })).reason, 'hash_diferente');
+  assert.equal((await core.verifyPackage(enc('abc'), { sha256: good, size: 9 })).reason, 'tamanho_diferente');
+  assert.equal((await core.verifyPackage(enc('abc'), null)).ok, false);
+});
+test('só geração maior é aceita', () => {
+  const cur = { generation: 5, packages: [] };
+  assert.equal(core.planUpdate(cur, { generation: 6, packages: [] }, []).accept, true);
+  assert.equal(core.planUpdate(cur, { generation: 5, packages: [] }, []).accept, false);
+  assert.equal(core.planUpdate(cur, { generation: 4, packages: [] }, []).reason, 'geracao_menor');
+  assert.equal(core.planUpdate(cur, { generation: 'x', packages: [] }, []).accept, false);
+});
+test('removidos e revogados saem do cache', () => {
+  const cur = { generation: 1, packages: [{ path: 'a', sha256: 'h1' }, { path: 'b', sha256: 'h2' }, { path: 'c', sha256: 'h3' }] };
+  const inc = { generation: 2, packages: [{ path: 'a', sha256: 'h1' }, { path: 'b', sha256: 'h2' }], revoked: ['h2'] };
+  const p = core.planUpdate(cur, inc, ['a', 'b', 'c']);
+  assert.deepEqual(p.remove.sort(), ['b', 'c']);
+});
+test('limpeza só toca o prefixo pv4-', () => {
+  assert.deepEqual(core.cleanupPlan(['pv4-x', 'pv4-keep', 'outro-app', 'workbox-1'], ['pv4-keep']), ['pv4-x']);
+});
+test('sem aba vazia e sem "em breve"', () => {
+  assert.deepEqual(core.visibleTabs(null), []);
+  assert.deepEqual(core.visibleTabs({ verses: [{ n: 1, t: 'x' }], entender: '  ', ligar: { texto: '' }, refs: [] }), ['ler']);
+  const all = core.visibleTabs({ verses: [1], entender: 'a', ligar: { texto: 'b' }, refs: ['c'] });
+  assert.deepEqual(all, ['ler', 'entender', 'ligar', 'aprofundar']);
+  assert.ok(!JSON.stringify(all).toLowerCase().includes('breve'));
+});
+test('busca ignora acento e caixa, e devolve a posição no texto original', () => {
+  assert.deepEqual(core.findMatch('Ação de graças', 'ACAO'), { start: 0, end: 4 });
+  assert.deepEqual(core.findMatch('Porque Deus amou o mundo', 'amou'), { start: 12, end: 16 });
+  assert.equal(core.findMatch('texto', 'zzz'), null);
+  assert.equal(core.findMatch('texto', '   '), null);
+});
+test('referências são lidas com nome, capítulo e versículo', () => {
+  assert.deepEqual(core.parseRef('1 João 3:16'), { name: '1 João', chapter: 3, verse: 16 });
+  assert.deepEqual(core.parseRef('Livro de Teste 2:1-2'), { name: 'Livro de Teste', chapter: 2, verse: 1 });
+  assert.deepEqual(core.parseRef('João 3'), { name: 'João', chapter: 3, verse: null });
+  assert.equal(core.parseRef('sem número'), null);
+});
+test('selo: "Revisado por pessoa" só com humanReviewed true; teste nunca parece ensino real', () => {
+  const base = 'Ensino do app, não é a Bíblia. Gerado por IA e conferido por outras IAs.';
+  assert.equal(core.stampText({ audit: { humanReviewed: false } }), base);
+  assert.equal(core.stampText({ audit: { humanReviewed: true } }), base + ' Revisado por pessoa.');
+  assert.equal(core.stampText({}), base);
+  assert.ok(core.stampText({ _teste: true }).includes('fictício'));
+  assert.ok(!core.stampText({ _teste: true }).includes('Revisado'));
+});
+test('baixar tudo calcula só o que falta', () => {
+  const m = { packages: [{ path: 'a' }, { path: 'b' }, { path: 'c' }] };
+  assert.deepEqual(core.missingPackages(m, ['b']).map(p => p.path), ['a', 'c']);
+  assert.deepEqual(core.missingPackages(m, ['a', 'b', 'c']), []);
+});
+<<<END>>>
+
+<<<FILE tests/shell.test.mjs>>>
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const read = p => readFileSync(join(root, p), 'utf8');
+const sw = read('sw.js'), html = read('index.html'), app = read('app.js'), pages = read('.github/workflows/pages.yml');
+const list = name => { const m = new RegExp('const ' + name + ' = \\[(.*?)\\];', 's').exec(sw); return [...m[1].matchAll(/'([^']+)'/g)].map(x => x[1]); };
+
+test('todo arquivo do cache do app existe no repositório', () => {
+  for (const f of list('SHELL_FILES')) if (f !== './') assert.ok(existsSync(join(root, f)), 'falta: ' + f);
+});
+test('index.html só aponta para arquivos que existem (assets opcionais ficam de fora)', () => {
+  for (const m of html.matchAll(/(?:src|href)="([^"#]+)"/g)) {
+    const u = m[1]; if (/^(https?:|mailto:|data:)/.test(u)) continue;
+    assert.ok(existsSync(join(root, u)), 'index.html aponta para arquivo inexistente: ' + u);
+  }
+});
+test('ícones do manifest do PWA existem', () => {
+  const m = JSON.parse(read('manifest.json'));
+  for (const i of m.icons) assert.ok(existsSync(join(root, i.src)), 'ícone ausente: ' + i.src);
+  assert.ok(m.icons.some(i => i.sizes === '192x192') && m.icons.some(i => i.sizes === '512x512'));
+});
+test('o deploy publica tudo o que o app usa', () => {
+  for (const f of ['index.html', 'app.js', 'styles.css', 'sw.js', 'manifest.json', 'config.json', 'reset.html', 'content-manifest.json', 'icons', 'src', 'content', 'assets'])
+    assert.ok(pages.includes(f), 'pages.yml não publica: ' + f);
+});
+test('versão do app é carimbada no deploy a partir do hash dos arquivos', () => {
+  assert.ok(sw.includes("'__SHELL_HASH__'") && app.includes("'__SHELL_HASH__'"));
+  assert.ok(pages.includes('__SHELL_HASH__') && pages.includes('sha256sum'));
+});
+test('service worker: sem skipWaiting automático e sem ler sw.js do cache', () => {
+  assert.equal((sw.match(/skipWaiting\(\)/g) || []).length, 1);
+  assert.ok(/message[\s\S]{0,200}SKIP_WAITING[\s\S]{0,80}skipWaiting\(\)/.test(sw));
+  assert.ok(sw.includes("file === 'sw.js') return"));
+});
+test('o app não faz nenhuma chamada a sites externos', () => {
+  for (const [n, t] of [['index.html', html], ['app.js', app], ['styles.css', read('styles.css')], ['sw.js', sw]])
+    assert.ok(!/https?:\/\//.test(t), n + ' contém endereço externo');
+});
+test('aba vazia nunca vira "em breve" na interface', () => {
+  assert.ok(!/em breve/i.test(app) && !/em breve/i.test(html));
+});
+test('proprietário, direitos reservados e chave Pix estão configurados', () => {
+  const c = JSON.parse(read('config.json'));
+  assert.equal(c.ownerName, 'Anderson Pereira Cabral');
+  assert.ok(/^\d{4}$/.test(c.year));
+  assert.ok(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(c.pixKey), 'chave Pix aleatória no formato esperado');
+  assert.ok(html.includes('id="rightsHome"') && html.includes('id="rightsMenu"') && html.includes('name="author"'));
+});
+<<<END>>>
+
+==================== CHECKSUMS (grave em /tmp/CHECKSUMS.txt) ====================
+<<<CHECKSUMS>>>
+57279828a72adbb3a709864a43322fab7d0918ba7154a6adf428b5f3d266fc46  .github/workflows/ci.yml
+92467c15c6975d2f04a26280737199f1eaa901ba0d2b4694a316e7068830bd05  .github/workflows/pages.yml
+ccad69eb18ff17ebf3ff014862e2aa7870cf9f3d379d2ba78d83a6fa1a18591d  .github/workflows/kaggle-viabilidade.yml
+19d544bb98d668661c6cb93bb346511027c7cc7bf62ba1f3f2051a036b1f3d4a  .github/workflows/importar-biblia.yml
+1fad871befb47ff7259b1f964c199cd48672d5ba1085802369b5758123f23262  scripts/import-ebible.py
+2677636430ec8c08c2fd86b0b052570348818a670a18b1f4816d25b218a50071  tests/import.test.mjs
+bcbeb11fa2dc1cea99bb605b36816e69405fd7095ffcbd4bf7b4aeb1ad23e077  tests/fixtures/content-src/meta.json
+fb3a85686fb6d468cbc0a0f3e2d037ec083033e1d16540533c197898afcc3f0f  tests/fixtures/content-src/biblia/teste/teste1-1.json
+e1ad098645051221882a5230ad8ab872308bddf9d50a720bb0d2efe15959bf3a  tests/fixtures/content-src/biblia/teste/teste1-2.json
+cd0c0ef2fc20d58dae12d03126ab6b82a76f283b77f100130566aa080bfcd950  tests/fixtures/content-src/biblia/teste/teste1-3.json
+2a03f70b67400070adfbcad8ced3576765e191d252a72624d6a93615b2df5f9d  tests/fixtures/content-src/camada2/teste/teste1-1-1-3.json
+0542041cd5c12346aaf1a7f6b2dd594c714b87c84ef86f62888e47db352be8cd  tests/fixtures/content-src/camada2/teste/teste1-2-1-2.json
+a4f4d522716f5ffbdc63bbfb81a444e6f23aac9387a1bdac8b8641ab6657f249  README.md
+925cf0cc6d35f2874348c80fe642162ad4e92f0c0f3134e647b81e82a7c6ce6f  app.js
+feb079bd9cd7b5008a4b9d3c4fe1934510e3eb315e707fd9477b9cdfe0f37fa2  config.json
+bcbeb11fa2dc1cea99bb605b36816e69405fd7095ffcbd4bf7b4aeb1ad23e077  content-src/meta.json
+fb3a85686fb6d468cbc0a0f3e2d037ec083033e1d16540533c197898afcc3f0f  content-src/biblia/teste/teste1-1.json
+e1ad098645051221882a5230ad8ab872308bddf9d50a720bb0d2efe15959bf3a  content-src/biblia/teste/teste1-2.json
+cd0c0ef2fc20d58dae12d03126ab6b82a76f283b77f100130566aa080bfcd950  content-src/biblia/teste/teste1-3.json
+2a03f70b67400070adfbcad8ced3576765e191d252a72624d6a93615b2df5f9d  content-src/camada2/teste/teste1-1-1-3.json
+0542041cd5c12346aaf1a7f6b2dd594c714b87c84ef86f62888e47db352be8cd  content-src/camada2/teste/teste1-2-1-2.json
+969021a6565b69108e984636b82e67117db6509313297d96eb6db35c4e3c1ab1  index.html
+f092f5d7f4d3d46164e5d9f09421e1a1f4a17d62f21f482d9b1da29518251d0d  kaggle/viabilidade/kernel-metadata.json
+7ccd3731ab6b350948756d1370b32aa6769f9f1f58678ed38d42191649d7448c  kaggle/viabilidade/teste.py
+fb4dac3abf278f7cef4de6a8d3eba5203a5eb07ccc5ef004fb57a9e24b10f94c  manifest.json
+5aed9494a45860f2a3043cce4f554911a64f971555182ab2b5bcd76e644521bf  reset.html
+5b7c819422709347bb69d45a6f97ef282a3b89859cbb5626c009436375a6f720  schemas/chapter.schema.json
+f8433102f365dac0e8b6f5a455d393f6412026307e6be2052bc489529aaa0ef5  schemas/manifest.schema.json
+91927faf7c6b6148bec623bc42c55c0d96568c4014bb11815b30a58cc2f87f53  schemas/passage.schema.json
+ff7101a26f5c36070acdc20c742b5d9a65caa7ca81e07e60a9e4f9d5e70549d8  scripts/build-manifest.mjs
+873e83c56ce3d5df5a273a367f203ed0fbf3b2c419c605e867de463ac9ed1ffc  scripts/mini-schema.mjs
+c7d4b87d8bc49f2f62750574aef5aa9d2d789fb372938ccb78da597d5865c061  scripts/validate-content.mjs
+515aeb4d20310178da0174a7230e029980d7b11b681c90ae1b4009bb2d9b6501  src/books.js
+6335f4a7bd97dacd58e1e472caccc5eec14eaa31936e3d20558f06c26bd254ea  src/core.js
+415415d1c7aee3022d1de1fe18fb1a7fab0188a08620d0694f64189dcfacd369  styles.css
+1b1b7aaddceee1d15f944fcb34954ec921e9c77d008d50a7f8bc1da7efbf3b8a  sw.js
+cccd409c967471a9724a447c8ad8eaac8b0f5eb3887f8f31f0a3cf059078ec39  tests/books.test.mjs
+95e5c76e75d817e09764a7c05614d4d4465fdb60ec2b05163ab0a71dd80ae444  tests/content.test.mjs
+1532cc31c96f4d88bbf3f3078a740942d0a2a969ebb7c48ff1ab704e6d8eb6db  tests/core.test.mjs
+a2bbd3ef6aeaaf533c40380a8ffb774002dc26caffe3b97789afba3d5d887235  tests/shell.test.mjs
+<<<END>>>
